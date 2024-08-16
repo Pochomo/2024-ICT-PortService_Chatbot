@@ -1,4 +1,4 @@
-name: Optimized CI/CD Pipeline
+name: CI/CD Pipeline without Docker
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
     branches: [develop]
 
 jobs:
-  build-and-deploy:
+  deploy:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -35,37 +35,6 @@ jobs:
       - name: Install dependencies
         run: poetry install --no-dev
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-
-      - name: Cache Docker layers
-        uses: actions/cache@v3
-        with:
-          path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-
-
-      - name: Build Docker image
-        uses: docker/build-push-action@v4
-        with:
-          context: .
-          push: false
-          tags: user/app:latest
-          outputs: type=docker,dest=/tmp/myimage.tar
-          cache-from: type=local,src=/tmp/.buildx-cache
-          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
-          build-args: |
-            BUILDKIT_INLINE_CACHE=1
-
-      - name: Move cache
-        run: |
-          rm -rf /tmp/.buildx-cache
-          mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
-
-      - name: Compress Docker image
-        run: gzip /tmp/myimage.tar
-
       - name: Deploy to EC2
         env:
           HOST: ${{ secrets.EC2_HOST }}
@@ -73,27 +42,34 @@ jobs:
         run: |
           echo "${{ secrets.EC2_PRIVATE_KEY }}" > private_key
           chmod 600 private_key
-          scp -i private_key -o StrictHostKeyChecking=no -C /tmp/myimage.tar.gz ${USER}@${HOST}:~
-          ssh -i private_key -o StrictHostKeyChecking=no ${USER}@${HOST} '
-            gunzip myimage.tar.gz
-            docker load < myimage.tar
-            docker stop myapp || true
-            docker rm myapp || true
-            docker run -d --name myapp -p 8000:8000 \
-              -e OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
-              -e MILVUS_HOST="${{ secrets.MILVUS_HOST }}" \
-              -e MILVUS_PORT="${{ secrets.MILVUS_PORT }}" \
-              -e DB_HOST="${{ secrets.DB_HOST }}" \
-              -e DB_USER="${{ secrets.DB_USER }}" \
-              -e DB_PASSWORD="${{ secrets.DB_PASSWORD }}" \
-              -e DB_NAME="${{ secrets.DB_NAME }}" \
-              -v ${HOME}/faiss_index:/code/faiss_index \
-              user/app:latest
-            rm myimage.tar
+          scp -i private_key -r ./* ${USER}@${HOST}:~/app
+          ssh -i private_key ${USER}@${HOST} '
+            cd ~/app
+            pip install poetry
+            poetry config virtualenvs.create false
+            poetry install --no-dev
+            sudo tee /etc/systemd/system/myapp.service > /dev/null <<EOT
+            [Unit]
+            Description=My FastAPI Application
+            After=network.target
+
+            [Service]
+            User=$USER
+            WorkingDirectory=/home/$USER/app
+            ExecStart=$(which poetry) run uvicorn main:app --host 0.0.0.0 --port 8000
+            Restart=always
+
+            [Install]
+            WantedBy=multi-user.target
+            EOT
+            sudo systemctl daemon-reload
+            sudo systemctl enable myapp
+            sudo systemctl restart myapp
+            echo "Application deployed and started"
           '
 
       - name: Clear cache
         if: failure()
         run: |
-          rm -rf /tmp/.buildx-cache
+          rm -rf ~/.cache/pypoetry
           echo "Cache cleared due to job failure"
