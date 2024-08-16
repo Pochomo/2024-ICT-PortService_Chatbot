@@ -4,19 +4,17 @@ FROM python:3.12-slim as builder
 # Set work directory
 WORKDIR /code
 
-# Install system dependencies
+# Install system dependencies and Poetry
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends gcc
+    apt-get install -y --no-install-recommends gcc && \
+    pip install --no-cache-dir poetry
 
-# Install Poetry
-RUN pip install --no-cache-dir poetry
-
-# Copy pyproject.toml and poetry.lock
+# Copy only requirements to cache them in docker layer
 COPY pyproject.toml poetry.lock* ./
 
 # Install dependencies
 RUN poetry config virtualenvs.create false && \
-    poetry install --no-interaction --no-ansi
+    poetry install --no-dev --no-interaction --no-ansi
 
 # Final stage
 FROM python:3.12-slim
@@ -24,7 +22,7 @@ FROM python:3.12-slim
 # Set work directory
 WORKDIR /code
 
-# Install system dependencies
+# Install runtime dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends libpq-dev && \
     apt-get clean && \
@@ -46,4 +44,4 @@ ENV PYTHONUNBUFFERED=1 \
     TOKENIZERS_PARALLELISM=false
 
 # Run the application
-CMD ["poetry", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

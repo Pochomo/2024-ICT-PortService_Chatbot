@@ -18,8 +18,10 @@ faiss-cpu = "^1.8.0"
 sentence-transformers = "^3.0.1"
 python-multipart = "^0.0.9"
 numpy = "<2.0"
-psutil = "^6.0.0"
 langchain-openai = "^0.1.21"
+
+[tool.poetry.dev-dependencies]
+psutil = "^6.0.0"
 
 [build-system]
 requires = ["poetry-core"]
