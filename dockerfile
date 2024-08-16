@@ -1,15 +1,15 @@
 # Build stage
-FROM nvidia/cuda:12.0.0-base-ubuntu22.04 as builder
+FROM python:3.12-slim as builder
 
 # Set work directory
 WORKDIR /code
 
 # Install system dependencies
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends gcc python3-dev python3-pip
+    apt-get install -y --no-install-recommends gcc
 
 # Install Poetry
-RUN pip3 install poetry
+RUN pip install --no-cache-dir poetry
 
 # Copy pyproject.toml and poetry.lock
 COPY pyproject.toml poetry.lock* ./
@@ -19,19 +19,19 @@ RUN poetry config virtualenvs.create false && \
     poetry install --no-interaction --no-ansi
 
 # Final stage
-FROM nvidia/cuda:12.0.0-base-ubuntu22.04
+FROM python:3.12-slim
 
 # Set work directory
 WORKDIR /code
 
 # Install system dependencies
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends libpq-dev python3 && \
+    apt-get install -y --no-install-recommends libpq-dev && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy Python dependencies from builder
-COPY --from=builder /usr/local/lib/python3.10/dist-packages /usr/local/lib/python3.10/dist-packages
+COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Copy project files
