@@ -91,3 +91,9 @@ jobs:
               user/app:latest
             rm myimage.tar
           '
+
+      - name: Clear cache
+        if: failure()
+        run: |
+          rm -rf /tmp/.buildx-cache
+          echo "Cache cleared due to job failure"
