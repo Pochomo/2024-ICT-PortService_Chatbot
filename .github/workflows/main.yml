@@ -46,14 +46,22 @@ jobs:
           ssh-keyscan -H $HOST >> ~/.ssh/known_hosts
 
           ssh -i private_key -o StrictHostKeyChecking=accept-new ${USER}@${HOST} '
-            # Fix apt_pkg issue
+            # Ensure PATH for poetry
+            echo "export PATH=\"/home/ubuntu/.local/bin:$PATH\"" >> ~/.bashrc
+            source ~/.bashrc
+
+            # Install Poetry if not already installed
+            if ! command -v poetry &> /dev/null
+            then
+                curl -sSL https://install.python-poetry.org | python3 -
+                echo "export PATH=\"/home/ubuntu/.local/bin:$PATH\"" >> ~/.bashrc
+                source ~/.bashrc
+            fi
+
+            # Fix apt_pkg issue if necessary
             sudo apt-get update
             sudo apt-get install --reinstall python3-apt
             sudo ln -s /usr/lib/python3/dist-packages/apt_pkg.cpython-310-x86_64-linux-gnu.so /usr/lib/python3/dist-packages/apt_pkg.so
-
-            # Ensure correct PATH
-            echo 'export PATH="/home/ubuntu/.local/bin:$PATH"' >> ~/.bashrc
-            source ~/.bashrc
 
             # Create project directory
             mkdir -p ~/ict
@@ -65,8 +73,10 @@ jobs:
           ssh -i private_key -o StrictHostKeyChecking=accept-new ${USER}@${HOST} '
             cd ~/ict
             
-            # Install project dependencies
+            # Ensure poetry uses the correct Python version
             poetry env use python3.11
+            
+            # Install project dependencies
             poetry install --no-dev
             
             # Setup systemd service
