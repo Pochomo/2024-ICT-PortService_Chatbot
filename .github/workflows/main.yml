@@ -48,26 +48,13 @@ jobs:
           ssh -i private_key -o StrictHostKeyChecking=accept-new ${USER}@${HOST} '
             # Fix apt_pkg issue
             sudo apt-get update
-            sudo apt-get install -y python3-apt
+            sudo apt-get install --reinstall python3-apt
+            sudo ln -s /usr/lib/python3/dist-packages/apt_pkg.cpython-310-x86_64-linux-gnu.so /usr/lib/python3/dist-packages/apt_pkg.so
 
-            # Install Python 3.11 and related packages
-            sudo add-apt-repository ppa:deadsnakes/ppa -y
-            sudo apt-get update
-            sudo apt-get install -y python3.11 python3.11-venv python3.11-dev
-            
-            # Set Python 3.11 as default
-            sudo update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
-            sudo update-alternatives --set python3 /usr/bin/python3.11
-            
-            # Update pip and install Poetry
-            curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py
-            python3.11 get-pip.py
-            rm get-pip.py
-            
-            curl -sSL https://install.python-poetry.org | python3.11 -
-            echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+            # Ensure correct PATH
+            echo 'export PATH="/home/ubuntu/.local/bin:$PATH"' >> ~/.bashrc
             source ~/.bashrc
-            
+
             # Create project directory
             mkdir -p ~/ict
           '
@@ -79,7 +66,6 @@ jobs:
             cd ~/ict
             
             # Install project dependencies
-            export PATH="$HOME/.local/bin:$PATH"
             poetry env use python3.11
             poetry install --no-dev
             
