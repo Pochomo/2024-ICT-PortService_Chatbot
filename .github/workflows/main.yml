@@ -45,33 +45,22 @@ jobs:
           mkdir -p ~/.ssh
           ssh-keyscan -H $HOST >> ~/.ssh/known_hosts
 
-          ssh -i private_key -o StrictHostKeyChecking=accept-new ${USER}@${HOST} '
-            # Ensure PATH for poetry
-            if ! grep -q "export PATH=\"/home/ubuntu/.local/bin:$PATH\"" ~/.bashrc; then
-              echo "export PATH=\"/home/ubuntu/.local/bin:$PATH\"" >> ~/.bashrc
-            fi
-            source ~/.bashrc
-
-            # Check if Poetry is installed, install if not
-            if ! command -v poetry &> /dev/null; then
-              curl -sSL https://install.python-poetry.org | python3 -
-              echo "export PATH=\"/home/ubuntu/.local/bin:$PATH\"" >> ~/.bashrc
-              source ~/.bashrc
-            fi
-
-            # Fix apt_pkg issue if necessary
-            sudo apt-get update
-            sudo apt-get install --reinstall python3-apt
-            sudo ln -sf /usr/lib/python3/dist-packages/apt_pkg.cpython-310-x86_64-linux-gnu.so /usr/lib/python3/dist-packages/apt_pkg.so
-
-            # Create project directory
-            mkdir -p ~/ict
-          '
-
           # Copy project files to EC2
           scp -i private_key -o StrictHostKeyChecking=accept-new -r ./* ${USER}@${HOST}:~/ict/
 
           ssh -i private_key -o StrictHostKeyChecking=accept-new ${USER}@${HOST} '
+            # Ensure PATH for poetry
+            export PATH="/home/ubuntu/.local/bin:$PATH"
+
+            # Check if Poetry is installed
+            if ! command -v poetry &> /dev/null; then
+              curl -sSL https://install.python-poetry.org | python3 -
+            fi
+
+            # Create project directory and ensure correct permissions
+            mkdir -p ~/ict
+            chmod -R 755 ~/ict
+
             cd ~/ict
 
             # Ensure poetry uses the correct Python version
@@ -81,7 +70,7 @@ jobs:
             poetry install --no-dev
 
             # Setup systemd service
-            sudo tee /etc/systemd/system/ict.service > /dev/null <<EOT
+            sudo tee /etc/systemd/system/ict.service > /dev/null <<EOF
             [Unit]
             Description=ICT FastAPI Application
             After=network.target
@@ -98,7 +87,7 @@ jobs:
 
             [Install]
             WantedBy=multi-user.target
-            EOT
+            EOF
 
             # Reload systemd, enable and start the service
             sudo systemctl daemon-reload
