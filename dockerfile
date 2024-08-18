@@ -1,29 +1,39 @@
-# Use an official Python runtime as a parent image
-FROM python:3.11-slim
+# Build dependencies stage
+FROM python:3.11-slim as builder
 
-# Set the working directory in the container
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Poetry
-RUN pip install poetry
+RUN pip install --no-cache-dir poetry
 
 # Copy only requirements to cache them in docker layer
 COPY pyproject.toml poetry.lock* /app/
 
-# Project initialization:
+# Install project dependencies
 RUN poetry config virtualenvs.create false \
-    && poetry install --no-interaction --no-ansi
+    && poetry export -f requirements.txt --output requirements.txt --without-hashes \
+    && pip install --no-cache-dir -r requirements.txt \
+    && rm -rf ~/.cache/pip
 
-# Copy the current directory contents into the container at /app
-COPY . /app
+# Runtime stage
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Copy only necessary files from builder stage
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+# Copy application code
+COPY ./app /app
 
 # Make port 8000 available to the world outside this container
 EXPOSE 8000
 
 # Run the application
-CMD ["poetry", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

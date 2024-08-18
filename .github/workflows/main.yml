@@ -50,14 +50,10 @@ jobs:
             # Run the new container
             docker run -d --name ict-container -p 8000:8000 \
               -e OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }} \
-              -e MILVUS_HOST=${{ secrets.MILVUS_HOST }} \
-              -e MILVUS_PORT=${{ secrets.MILVUS_PORT }} \
               -e DB_HOST=${{ secrets.DB_HOST }} \
               -e DB_USER=${{ secrets.DB_USER }} \
               -e DB_PASSWORD=${{ secrets.DB_PASSWORD }} \
               -e DB_NAME=${{ secrets.DB_NAME }} \
-              -e ELASTICSEARCH_HOST=${{ secrets.ELASTICSEARCH_HOST }} \
-              -e ELASTICSEARCH_PORT=${{ secrets.ELASTICSEARCH_PORT }} \
               ${{ secrets.DOCKERHUB_USERNAME }}/ict-app:latest
 
             echo "ICT application deployed and started"
