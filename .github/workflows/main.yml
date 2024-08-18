@@ -47,21 +47,20 @@ jobs:
 
           ssh -i private_key -o StrictHostKeyChecking=accept-new ${USER}@${HOST} '
             # Ensure PATH for poetry
-            echo "export PATH=\"/home/ubuntu/.local/bin:$PATH\"" >> ~/.bashrc
+            if ! grep -q "export PATH=\"/home/ubuntu/.local/bin:$PATH\"" ~/.bashrc; then
+              echo "export PATH=\"/home/ubuntu/.local/bin:$PATH\"" >> ~/.bashrc
+            fi
             source ~/.bashrc
 
-            # Install Poetry if not already installed
-            if ! command -v poetry &> /dev/null
-            then
-                curl -sSL https://install.python-poetry.org | python3 -
-                echo "export PATH=\"/home/ubuntu/.local/bin:$PATH\"" >> ~/.bashrc
-                source ~/.bashrc
+            # Check if Poetry is installed, install if not
+            if ! command -v poetry &> /dev/null; then
+              curl -sSL https://install.python-poetry.org | python3 -
             fi
 
             # Fix apt_pkg issue if necessary
             sudo apt-get update
             sudo apt-get install --reinstall python3-apt
-            sudo ln -s /usr/lib/python3/dist-packages/apt_pkg.cpython-310-x86_64-linux-gnu.so /usr/lib/python3/dist-packages/apt_pkg.so
+            sudo ln -sf /usr/lib/python3/dist-packages/apt_pkg.cpython-310-x86_64-linux-gnu.so /usr/lib/python3/dist-packages/apt_pkg.so
 
             # Create project directory
             mkdir -p ~/ict
@@ -72,13 +71,13 @@ jobs:
 
           ssh -i private_key -o StrictHostKeyChecking=accept-new ${USER}@${HOST} '
             cd ~/ict
-            
+
             # Ensure poetry uses the correct Python version
             poetry env use python3.11
-            
+
             # Install project dependencies
             poetry install --no-dev
-            
+
             # Setup systemd service
             sudo tee /etc/systemd/system/ict.service > /dev/null <<EOT
             [Unit]
@@ -98,12 +97,12 @@ jobs:
             [Install]
             WantedBy=multi-user.target
             EOT
-            
+
             # Reload systemd, enable and start the service
             sudo systemctl daemon-reload
             sudo systemctl enable ict
             sudo systemctl restart ict
-            
+
             echo "ICT application deployed and started"
           '
 
