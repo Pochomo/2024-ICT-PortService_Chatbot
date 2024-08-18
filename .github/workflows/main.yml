@@ -55,6 +55,8 @@ jobs:
             # Check if Poetry is installed, install if not
             if ! command -v poetry &> /dev/null; then
               curl -sSL https://install.python-poetry.org | python3 -
+              echo "export PATH=\"/home/ubuntu/.local/bin:$PATH\"" >> ~/.bashrc
+              source ~/.bashrc
             fi
 
             # Fix apt_pkg issue if necessary
