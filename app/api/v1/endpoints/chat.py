@@ -1,18 +1,17 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File
-from app.services.document_loader import HWPLoader
+from app.services.document_loader import HWPLoaderWrapper
 from app.services.vector_store import VectorStore
 from app.core.config import settings
 from app.prompts.port_authority_prompt import PORT_AUTHORITY_PROMPT
 from langchain_community.chat_models import ChatOpenAI
 from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferWindowMemory
-from langchain_openai import ChatOpenAI
 
 import logging
 
 router = APIRouter()
 
-hwp_loader = HWPLoader()
+hwp_loader = HWPLoaderWrapper()
 vector_store = VectorStore()
 
 logger = logging.getLogger(__name__)
