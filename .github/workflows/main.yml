@@ -45,32 +45,32 @@ jobs:
           mkdir -p ~/.ssh
           ssh-keyscan -H $HOST >> ~/.ssh/known_hosts
 
-          ssh -i private_key -o StrictHostKeyChecking=accept-new ${USER}@${HOST} '
-            # Fix apt_pkg issue
-            sudo apt-get update
-            sudo apt-get install --reinstall python3-apt
-            sudo ln -s /usr/lib/python3/dist-packages/apt_pkg.cpython-310-x86_64-linux-gnu.so /usr/lib/python3/dist-packages/apt_pkg.so
-
-            # Ensure correct PATH
-            echo 'export PATH="/home/ubuntu/.local/bin:$PATH"' >> ~/.bashrc
-            source ~/.bashrc
-
-            # Create project directory
-            mkdir -p ~/ict
-          '
-
           # Copy project files to EC2
           scp -i private_key -o StrictHostKeyChecking=accept-new -r ./* ${USER}@${HOST}:~/ict/
 
           ssh -i private_key -o StrictHostKeyChecking=accept-new ${USER}@${HOST} '
+            # Ensure PATH for poetry
+            export PATH="/home/ubuntu/.local/bin:$PATH"
+
+            # Check if Poetry is installed
+            if ! command -v poetry &> /dev/null; then
+              curl -sSL https://install.python-poetry.org | python3 -
+            fi
+
+            # Create project directory and ensure correct permissions
+            mkdir -p ~/ict
+            chmod -R 755 ~/ict
+
             cd ~/ict
-            
-            # Install project dependencies
+
+            # Ensure poetry uses the correct Python version
             poetry env use python3.11
+
+            # Install project dependencies
             poetry install --no-dev
-            
+
             # Setup systemd service
-            sudo tee /etc/systemd/system/ict.service > /dev/null <<EOT
+            sudo tee /etc/systemd/system/ict.service > /dev/null <<EOF
             [Unit]
             Description=ICT FastAPI Application
             After=network.target
@@ -81,16 +81,19 @@ jobs:
             Environment="PATH=/home/$USER/.local/bin:$PATH"
             ExecStart=/home/$USER/.local/bin/poetry run uvicorn main:app --host 0.0.0.0 --port 8000
             Restart=always
+            RestartSec=5
+            StartLimitIntervalSec=60
+            StartLimitBurst=5
 
             [Install]
             WantedBy=multi-user.target
-            EOT
-            
+            EOF
+
             # Reload systemd, enable and start the service
             sudo systemctl daemon-reload
             sudo systemctl enable ict
             sudo systemctl restart ict
-            
+
             echo "ICT application deployed and started"
           '
 
