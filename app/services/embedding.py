@@ -1,11 +1,8 @@
-import openai
-from app.core.config import settings
+from langchain_huggingface import HuggingFaceEmbeddings
 
-openai.api_key = settings.OPENAI_API_KEY
+class EmbeddingService:
+    def __init__(self):
+        self.model = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
-def get_embedding(text: str):
-    response = openai.Embedding.create(
-        input=text,
-        model="text-embedding-ada-002"
-    )
-    return response['data'][0]['embedding']
+    def embed_text(self, text):
+        return self.model.embed_query(text)

@@ -1,11 +1,17 @@
-import os
-from dotenv import load_dotenv
+from pydantic_settings import BaseSettings
 
-load_dotenv()
+class Settings(BaseSettings):
+    OPENAI_API_KEY: str
+    MILVUS_HOST: str
+    MILVUS_PORT: str
+    DB_HOST: str
+    DB_USER: str
+    DB_PASSWORD: str
+    DB_NAME: str
+    ELASTICSEARCH_HOST: str
+    ELASTICSEARCH_PORT: str
 
-class Settings:
-    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY")
-    MILVUS_HOST: str = os.getenv("MILVUS_HOST", "localhost")
-    MILVUS_PORT: str = os.getenv("MILVUS_PORT", "19530")
+    class Config:
+        env_file = ".env"
 
 settings = Settings()
