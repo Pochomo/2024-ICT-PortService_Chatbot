@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, HTTPException, UploadFile, File, FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from app.services.document_loader import HWPLoader
 from app.services.vector_store import VectorStore
 from app.core.config import settings
@@ -10,6 +11,19 @@ from langchain_openai import ChatOpenAI
 
 import logging
 
+# FastAPI 앱 생성
+app = FastAPI()
+
+# CORS 미들웨어 추가
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],  # 필요한 경우 특정 도메인으로 제한 가능
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# 라우터 생성
 router = APIRouter()
 
 hwp_loader = HWPLoader()
@@ -55,7 +69,6 @@ async def chat(message: str):
         
         return {
             "answer": response['answer'],
-            # 'source_documents'가 없을 경우 빈 리스트 반환
             "source_documents": [doc.page_content for doc in response.get('source_documents', [])]
         }
     except Exception as e:
@@ -79,9 +92,7 @@ async def get_vector_store_content():
         if vector_store.vector_store is None:
             return {"message": "Vector store is empty"}
         
-        # FAISS doesn't provide a direct way to access all stored vectors
-        # So we'll perform a similarity search with an empty query to get some results
-        results = vector_store.similarity_search("", k=10)  # Get top 10 results
+        results = vector_store.similarity_search("", k=10)
         
         content = [
             {
@@ -93,3 +104,6 @@ async def get_vector_store_content():
         return {"vector_store_content": content}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# FastAPI 애플리케이션에 라우터 추가
+app.include_router(router)

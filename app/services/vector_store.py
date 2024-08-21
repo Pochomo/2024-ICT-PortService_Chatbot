@@ -38,3 +38,4 @@ class VectorStore:
         else:
             print(f"No existing index found at {path}. Starting with an empty index.")
             self.vector_store = None
+

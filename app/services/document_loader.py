@@ -1,8 +1,5 @@
-from langchain_community.document_loaders import UnstructuredFileIOLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.schema import Document
-import tempfile
-import os
 import zipfile
 from io import BytesIO
 import xml.etree.ElementTree as ET
@@ -19,26 +16,18 @@ class HWPLoader:
         if self.is_hwpx(file_content):
             text = self.extract_text_from_hwpx(file_content)
         else:
-            text = self.extract_text_from_hwp(file_content)
+            raise ValueError("Only HWPX format is supported for HWP 2022. Please convert your file to HWPX format.")
+        
+        if not text:
+            raise ValueError("Failed to extract text from the provided HWPX file.")
         
         documents = [Document(page_content=text)]
         split_docs = self.text_splitter.split_documents(documents)
         return split_docs
 
     def is_hwpx(self, file_content):
+        # HWPX files are typically ZIP archives, identified by the 'PK' signature
         return file_content.startswith(b'PK')
-
-    def extract_text_from_hwp(self, file_content):
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.hwp') as temp_file:
-            temp_file.write(file_content)
-            temp_file_path = temp_file.name
-
-        try:
-            loader = UnstructuredFileIOLoader(temp_file_path)
-            documents = loader.load()
-            return ' '.join([doc.page_content for doc in documents])
-        finally:
-            os.unlink(temp_file_path)
 
     def extract_text_from_hwpx(self, file_content):
         with zipfile.ZipFile(BytesIO(file_content), 'r') as zip_ref:
