@@ -1,4 +1,5 @@
-from langchain.embeddings import HuggingFaceEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
+
 
 class EmbeddingService:
     def __init__(self):
