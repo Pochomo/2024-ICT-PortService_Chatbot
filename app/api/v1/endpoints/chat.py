@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, UploadFile, Depends, File
 from app.services.document_loader import HWPLoader  # 올바른 클래스 이름으로 수정
+from fastapi import APIRouter, HTTPException, UploadFile, File
 from app.services.vector_store import VectorStore
 from app.core.config import settings
 from app.prompts.port_authority_prompt import PORT_AUTHORITY_PROMPT
@@ -13,6 +14,7 @@ from app.db import models, database
 import logging
 
 router = APIRouter()
+
 
 hwp_loader = HWPLoader()  # 올바른 클래스 인스턴스화
 vector_store = VectorStore()
@@ -44,12 +46,14 @@ async def chat(request: ChatRequest):
     try:
         if vector_store.vector_store is None:
             logger.error("Vector store is empty. Please upload documents first.")
+
             raise HTTPException(status_code=400, detail="Vector store is empty. Please upload documents first.")
 
         llm = ChatOpenAI(temperature=0, openai_api_key=settings.OPENAI_API_KEY)
         memory = ConversationBufferWindowMemory(k=3, memory_key="chat_history", return_messages=True)
 
         logger.info("Creating conversation chain.")
+
         conversation_chain = ConversationalRetrievalChain.from_llm(
             llm=llm,
             retriever=vector_store.vector_store.as_retriever(search_kwargs={"k": 5}),

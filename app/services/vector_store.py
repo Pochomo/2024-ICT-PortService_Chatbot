@@ -9,6 +9,7 @@ class VectorStore:
         self.vector_store = None
 
     def create_vector_store(self, documents):
+
         # 문서로부터 벡터 스토어 생성
         self.vector_store = FAISS.from_documents(documents, self.embedding_model)
 
