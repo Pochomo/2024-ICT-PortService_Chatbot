@@ -10,6 +10,7 @@ from langchain.memory import ConversationBufferWindowMemory
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.db import models, database
+from urllib.parse import unquote
 
 import logging
 
@@ -114,7 +115,8 @@ def get_db():
         db.close()
 
 @router.post("/get-info")
-async def get_information(button_name: str, db: Session = Depends(get_db)):
+async def get_info(button_name: str, db: Session = Depends(get_db)):
+    button_name = unquote(button_name)  # URL 인코딩된 문자열을 디코딩
     try:
         # MySQL에서 button_name과 일치하는 정보를 검색
         information = db.query(models.Information).filter(models.Information.button_name == button_name).first()
@@ -129,9 +131,9 @@ async def get_information(button_name: str, db: Session = Depends(get_db)):
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
-    
-@router.post("/endpoint")  # 두 엔드포인트를 하나의 함수로 처리
-async def get_information(infoType: str, db: Session = Depends(get_db)):
+
+@router.post("/endpoint")
+async def get_info_by_title(infoType: str, db: Session = Depends(get_db)):
     try:
         # MySQL에서 infoType과 일치하는 정보를 검색
         information = db.query(models.Information).filter(models.Information.title == infoType).first()
