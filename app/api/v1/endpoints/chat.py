@@ -1,6 +1,5 @@
 from fastapi import APIRouter, HTTPException, UploadFile, Depends, File
-from app.services.document_loader import HWPLoader  # 올바른 클래스 이름으로 수정
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from app.services.document_loader import HWPLoader
 from app.services.vector_store import VectorStore
 from app.core.config import settings
 from app.prompts.port_authority_prompt import PORT_AUTHORITY_PROMPT
@@ -10,13 +9,15 @@ from langchain.memory import ConversationBufferWindowMemory
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.db import models, database
+from urllib.parse import unquote
+from langdetect import detect
+from deep_translator import GoogleTranslator
 
 import logging
 
 router = APIRouter()
 
-
-hwp_loader = HWPLoader()  # 올바른 클래스 인스턴스화
+hwp_loader = HWPLoader()
 vector_store = VectorStore()
 
 logger = logging.getLogger(__name__)
@@ -41,18 +42,26 @@ async def upload_hwp(file: UploadFile = File(...)):
     
 class ChatRequest(BaseModel):
     message: str
+
+translator_ko = GoogleTranslator(source='auto', target='ko')
+translator_en = GoogleTranslator(source='auto', target='en')
+
 @router.post("/chat")
 async def chat(request: ChatRequest):
     try:
         if vector_store.vector_store is None:
             logger.error("Vector store is empty. Please upload documents first.")
-
             raise HTTPException(status_code=400, detail="Vector store is empty. Please upload documents first.")
+
+        input_language = detect(request.message)
+
+        if input_language == 'ko':
+            translated_text = request.message
+        else:
+            translated_text = translator_ko.translate(request.message)
 
         llm = ChatOpenAI(temperature=0, openai_api_key=settings.OPENAI_API_KEY)
         memory = ConversationBufferWindowMemory(k=3, memory_key="chat_history", return_messages=True)
-
-        logger.info("Creating conversation chain.")
 
         conversation_chain = ConversationalRetrievalChain.from_llm(
             llm=llm,
@@ -61,25 +70,24 @@ async def chat(request: ChatRequest):
             combine_docs_chain_kwargs={"prompt": PORT_AUTHORITY_PROMPT}
         )
 
-        logger.info(f"Running conversation chain with question: {request.message}")
-        response = conversation_chain({"question": request.message})
+        logger.info(f"Running conversation chain with question: {translated_text}")
+        response = conversation_chain({"question": translated_text})
 
-        logger.info(f"Response generated: {response}")
+        if input_language == 'ko':
+            translated_response = response['answer']
+        else:
+            translated_response = translator_en.translate(response['answer'])
+
+        logger.info(f"Response generated: {translated_response}")
 
         return {
-            "answer": response['answer'],
+            "answer": translated_response,
             "source_documents": [doc.page_content for doc in response.get('source_documents', [])]
         }
     except Exception as e:
         logger.error(f"Error in chat endpoint: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="An error occurred while processing your request.")
 
-@router.on_event("startup")
-def startup_event():
-    try:
-        vector_store.load_local("faiss_index")
-    except:
-        print("No existing index found. Starting with an empty index.")
 
 @router.on_event("shutdown")
 def shutdown_event():
@@ -114,7 +122,8 @@ def get_db():
         db.close()
 
 @router.post("/get-info")
-async def get_information(button_name: str, db: Session = Depends(get_db)):
+async def get_info(button_name: str, db: Session = Depends(get_db)):
+    button_name = unquote(button_name)  # URL 인코딩된 문자열을 디코딩
     try:
         # MySQL에서 button_name과 일치하는 정보를 검색
         information = db.query(models.Information).filter(models.Information.button_name == button_name).first()
@@ -129,9 +138,9 @@ async def get_information(button_name: str, db: Session = Depends(get_db)):
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
-    
-@router.post("/endpoint")  # 두 엔드포인트를 하나의 함수로 처리
-async def get_information(infoType: str, db: Session = Depends(get_db)):
+
+@router.post("/endpoint")
+async def get_info_by_title(infoType: str, db: Session = Depends(get_db)):
     try:
         # MySQL에서 infoType과 일치하는 정보를 검색
         information = db.query(models.Information).filter(models.Information.title == infoType).first()
