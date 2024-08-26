@@ -1,6 +1,5 @@
 from fastapi import APIRouter, HTTPException, UploadFile, Depends, File
-from app.services.document_loader import HWPLoader  # 올바른 클래스 이름으로 수정
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from app.services.document_loader import HWPLoader
 from app.services.vector_store import VectorStore
 from app.core.config import settings
 from app.prompts.port_authority_prompt import PORT_AUTHORITY_PROMPT
@@ -18,8 +17,7 @@ import logging
 
 router = APIRouter()
 
-
-hwp_loader = HWPLoader()  # 올바른 클래스 인스턴스화
+hwp_loader = HWPLoader()
 vector_store = VectorStore()
 
 logger = logging.getLogger(__name__)
@@ -45,8 +43,8 @@ async def upload_hwp(file: UploadFile = File(...)):
 class ChatRequest(BaseModel):
     message: str
 
-translator_ko = GoogleTranslator(source='auto', target='ko')  # 영어를 한국어로 번역할 때 사용
-translator_en = GoogleTranslator(source='auto', target='en')  # 한국어를 영어로 번역할 때 사용
+translator_ko = GoogleTranslator(source='auto', target='ko')
+translator_en = GoogleTranslator(source='auto', target='en')
 
 @router.post("/chat")
 async def chat(request: ChatRequest):
@@ -55,17 +53,13 @@ async def chat(request: ChatRequest):
             logger.error("Vector store is empty. Please upload documents first.")
             raise HTTPException(status_code=400, detail="Vector store is empty. Please upload documents first.")
 
-        # 입력된 문장의 언어 감지
         input_language = detect(request.message)
 
         if input_language == 'ko':
-            # 한국어로 입력된 경우, 번역하지 않고 그대로 사용
             translated_text = request.message
         else:
-            # 영어로 입력된 경우, 한국어로 번역
             translated_text = translator_ko.translate(request.message)
 
-        # 번역된 또는 원본 한국어 문장으로 기존 로직 수행
         llm = ChatOpenAI(temperature=0, openai_api_key=settings.OPENAI_API_KEY)
         memory = ConversationBufferWindowMemory(k=3, memory_key="chat_history", return_messages=True)
 
@@ -80,10 +74,8 @@ async def chat(request: ChatRequest):
         response = conversation_chain({"question": translated_text})
 
         if input_language == 'ko':
-            # 입력이 한국어였던 경우, 번역 없이 응답
             translated_response = response['answer']
         else:
-            # 입력이 영어였던 경우, 한국어 응답을 영어로 번역
             translated_response = translator_en.translate(response['answer'])
 
         logger.info(f"Response generated: {translated_response}")
@@ -96,12 +88,6 @@ async def chat(request: ChatRequest):
         logger.error(f"Error in chat endpoint: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="An error occurred while processing your request.")
 
-@router.on_event("startup")
-def startup_event():
-    try:
-        vector_store.load_local("faiss_index")
-    except:
-        print("No existing index found. Starting with an empty index.")
 
 @router.on_event("shutdown")
 def shutdown_event():

@@ -12,7 +12,7 @@ class HWPLoader:
             length_function=len,
         )
 
-    async def load_and_split(self, file_content):
+    def load_and_split(self, file_content):
         if self.is_hwpx(file_content):
             text = self.extract_text_from_hwpx(file_content)
         else:
@@ -26,7 +26,6 @@ class HWPLoader:
         return split_docs
 
     def is_hwpx(self, file_content):
-        # HWPX files are typically ZIP archives, identified by the 'PK' signature
         return file_content.startswith(b'PK')
 
     def extract_text_from_hwpx(self, file_content):
