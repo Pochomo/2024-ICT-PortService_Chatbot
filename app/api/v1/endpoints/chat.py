@@ -39,7 +39,7 @@ async def upload_hwp(file: UploadFile = File(...)):
     except Exception as e:
         logger.error(f"Error processing file: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
-    
+
 class ChatRequest(BaseModel):
     message: str
 
@@ -54,6 +54,7 @@ async def chat(request: ChatRequest):
             raise HTTPException(status_code=400, detail="Vector store is empty. Please upload documents first.")
 
         input_language = detect(request.message)
+        logger.info(f"Detected language: {input_language}")
 
         if input_language == 'ko':
             translated_text = request.message
@@ -88,20 +89,18 @@ async def chat(request: ChatRequest):
         logger.error(f"Error in chat endpoint: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="An error occurred while processing your request.")
 
-
 @router.on_event("shutdown")
 def shutdown_event():
     vector_store.save_local("faiss_index")
 
-@router.get("/vector-store-content")
-async def get_vector_store_content():
+@router.get("/check-vector-store")
+async def check_vector_store():
     try:
         if vector_store.vector_store is None:
             return {"message": "Vector store is empty"}
         
-        # FAISS doesn't provide a direct way to access all stored vectors
-        # So we'll perform a similarity search with an empty query to get some results
-        results = vector_store.similarity_search("", k=10)  # Get top 10 results
+        # 모든 문서를 출력해봅니다.
+        results = vector_store.similarity_search("", k=100)  # 최대 100개의 문서를 가져옵니다.
         
         content = [
             {
@@ -113,6 +112,27 @@ async def get_vector_store_content():
         return {"vector_store_content": content}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# @router.get("/vector-store-content")
+# async def get_vector_store_content():
+#     try:
+#         if vector_store.vector_store is None:
+#             return {"message": "Vector store is empty"}
+        
+#         # FAISS doesn't provide a direct way to access all stored vectors
+#         # So we'll perform a similarity search with an empty query to get some results
+#         results = vector_store.similarity_search("", k=10)  # Get top 10 results
+        
+#         content = [
+#             {
+#                 "content": doc.page_content,
+#                 "metadata": doc.metadata
+#             } for doc in results
+#         ]
+        
+#         return {"vector_store_content": content}
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
     
 def get_db():
     db = database.SessionLocal()
