@@ -11,6 +11,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.db import models, database
 from urllib.parse import unquote
+from langdetect import detect
+from deep_translator import GoogleTranslator
 
 import logging
 
@@ -42,18 +44,30 @@ async def upload_hwp(file: UploadFile = File(...)):
     
 class ChatRequest(BaseModel):
     message: str
+
+translator_ko = GoogleTranslator(source='auto', target='ko')  # 영어를 한국어로 번역할 때 사용
+translator_en = GoogleTranslator(source='auto', target='en')  # 한국어를 영어로 번역할 때 사용
+
 @router.post("/chat")
 async def chat(request: ChatRequest):
     try:
         if vector_store.vector_store is None:
             logger.error("Vector store is empty. Please upload documents first.")
-
             raise HTTPException(status_code=400, detail="Vector store is empty. Please upload documents first.")
 
+        # 입력된 문장의 언어 감지
+        input_language = detect(request.message)
+
+        if input_language == 'ko':
+            # 한국어로 입력된 경우, 번역하지 않고 그대로 사용
+            translated_text = request.message
+        else:
+            # 영어로 입력된 경우, 한국어로 번역
+            translated_text = translator_ko.translate(request.message)
+
+        # 번역된 또는 원본 한국어 문장으로 기존 로직 수행
         llm = ChatOpenAI(temperature=0, openai_api_key=settings.OPENAI_API_KEY)
         memory = ConversationBufferWindowMemory(k=3, memory_key="chat_history", return_messages=True)
-
-        logger.info("Creating conversation chain.")
 
         conversation_chain = ConversationalRetrievalChain.from_llm(
             llm=llm,
@@ -62,13 +76,20 @@ async def chat(request: ChatRequest):
             combine_docs_chain_kwargs={"prompt": PORT_AUTHORITY_PROMPT}
         )
 
-        logger.info(f"Running conversation chain with question: {request.message}")
-        response = conversation_chain({"question": request.message})
+        logger.info(f"Running conversation chain with question: {translated_text}")
+        response = conversation_chain({"question": translated_text})
 
-        logger.info(f"Response generated: {response}")
+        if input_language == 'ko':
+            # 입력이 한국어였던 경우, 번역 없이 응답
+            translated_response = response['answer']
+        else:
+            # 입력이 영어였던 경우, 한국어 응답을 영어로 번역
+            translated_response = translator_en.translate(response['answer'])
+
+        logger.info(f"Response generated: {translated_response}")
 
         return {
-            "answer": response['answer'],
+            "answer": translated_response,
             "source_documents": [doc.page_content for doc in response.get('source_documents', [])]
         }
     except Exception as e:
