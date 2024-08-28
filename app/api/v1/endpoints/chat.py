@@ -46,12 +46,15 @@ async def upload_pdf(files: List[UploadFile] = File(...)):
                 logger.warning(f"Invalid file type: {file.filename}")
                 continue  # 유효하지 않은 파일은 건너뜁니다.
 
-            # 키워드에 따라 문서를 분할하여 로드
-            new_documents = pdf_loader.load_and_split_by_keyword(temp_path, keywords=["울산항만공사", "부산항만공사", "인천항만공사"])
+            new_documents = pdf_loader.load_and_split(temp_path)
             
             if not new_documents:
                 logger.error(f"No documents were extracted from {file.filename}.")
                 continue  # 문서를 추출하지 못한 경우 건너뜁니다.
+
+            for doc in new_documents:
+                is_law = pdf_loader.is_law_related(doc.page_content)
+                vector_store.add_documents([doc], is_law_related=is_law)
             
             logger.info(f"Processed {len(new_documents)} documents from {file.filename}")
             documents.extend(new_documents)
@@ -63,50 +66,30 @@ async def upload_pdf(files: List[UploadFile] = File(...)):
     if not documents:
         raise HTTPException(status_code=500, detail="No valid documents were extracted from any of the files.")
 
-    # 벡터 스토어에 추가
-    try:
-        vector_store.add_documents(documents)
-        logger.info(f"Documents added to vector store: {len(vector_store.documents)} documents in total.")
-    except ValueError as ve:
-        logger.error(f"Error adding documents to vector store: {str(ve)}")
-        raise HTTPException(status_code=500, detail="No unique documents were found to create vector store.")
-    
     return {"message": f"{len(files)} files uploaded and processed successfully"}
 
 
 @router.post("/chat")
 async def chat(request: ChatRequest):
     try:
-        if vector_store.vector_store is None:
-            if vector_store.documents:
-                vector_store.create_vector_store(vector_store.documents)
-            else:
-                logger.error("Vector store is empty. Please upload documents first.")
-                raise HTTPException(status_code=400, detail="Vector store is empty. Please upload documents first.")
+        # Load vector stores if not already loaded
+        if vector_store.general_vector_store is None and vector_store.documents:
+            vector_store.create_vector_store()
 
         input_language = detect(request.message)
         translated_text = translator_ko.translate(request.message) if input_language != 'ko' else request.message
 
-        # 항만공사 이름을 질의에서 식별
-        target_harbor = None
-        if "울산" in translated_text:
-            target_harbor = "울산항만공사"
-        elif "부산" in translated_text:
-            target_harbor = "부산항만공사"
-        elif "인천" in translated_text:
-            target_harbor = "인천항만공사"
+        # Check if the query is law-related
+        is_law = vector_store.is_law_related(translated_text)
 
-        # 검색 시 필터링 적용
-        results = vector_store.similarity_search(translated_text, k=10)
-        if target_harbor:
-            results = [doc for doc in results if target_harbor in doc.page_content]
-
-        if not results:
-            logger.error("No relevant documents found for the specified harbor.")
-            raise HTTPException(status_code=404, detail="No relevant information found.")
+        # Perform the similarity search on the appropriate vector store
+        results = vector_store.similarity_search(translated_text, is_law_related=is_law, k=10)
         
-        retriever = vector_store.langchain_vector_store.as_retriever()
+        # Use the appropriate vector store (general or law) to create the retriever
+        target_vector_store = vector_store.law_vector_store if is_law else vector_store.general_vector_store
+        retriever = target_vector_store.as_retriever()
 
+        # Use the ConversationalRetrievalChain to generate a response
         conversation_chain = ConversationalRetrievalChain.from_llm(
             llm=ChatOpenAI(temperature=0.5, openai_api_key=settings.OPENAI_API_KEY),
             retriever=retriever,    
@@ -127,36 +110,47 @@ async def chat(request: ChatRequest):
         raise HTTPException(status_code=500, detail="An error occurred while processing your request.")
 
 
-
-
 @router.on_event("shutdown")
 def shutdown_event():
     vector_store.save_local("faiss_index")
 
 @router.get("/check-vector-store")
-async def check_vector_store():
+async def check_vector_store(is_law_related: bool = False):
     try:
-        if vector_store.vector_store is None:
-            return {"message": "Vector store is empty"}
+        # 선택된 벡터 스토어를 확인
+        if is_law_related:
+            target_vector_store = vector_store.law_vector_store
+            target_documents = vector_store.law_documents
+        else:
+            target_vector_store = vector_store.general_vector_store
+            target_documents = vector_store.general_documents
+
+        if target_vector_store is None:
+            return {"message": f"{'Law' if is_law_related else 'General'} vector store is empty"}
 
         # 중복 제거를 위해 집합을 사용
         seen_contents = set()
         content = []
 
-        for doc in vector_store.documents:
+        for doc in target_documents:
             if doc.page_content not in seen_contents:
                 seen_contents.add(doc.page_content)
                 content.append({
                     "content": doc.page_content,
                     "metadata": doc.metadata
                 })
-        
-        if not content:
-            return {"message": "No documents found in vector store"}
 
-        return {"vector_store_content": content}
+        if not content:
+            return {"message": "No documents found in the vector store"}
+
+        return {
+            "message": f"{'Law' if is_law_related else 'General'} vector store contains documents",
+            "vector_store_content": content
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
 
 
 def get_db():
