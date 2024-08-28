@@ -18,6 +18,10 @@ class PDFLoader:
         text = re.sub(r'\s+', ' ', text).strip()  # 여러 공백을 하나로
         return text
 
+    def is_law_related(self, text):
+        law_keywords = ["법", "제조", "조항", "시행령", "규정", "법령", "조치", "관련 법"]
+        return any(keyword in text for keyword in law_keywords)
+
     def load_and_split(self, pdf_path):
         documents = []
         try:
@@ -57,21 +61,3 @@ class PDFLoader:
             split_documents.extend(docs)
 
         return split_documents
-    
-    def get_related_content(query_result, all_documents, max_length=2000):
-        """
-        검색 결과에 연관된 추가 콘텐츠를 가져옴.
-        """
-        related_content = query_result.page_content
-        current_length = len(related_content)
-        page_number = query_result.metadata["page_number"]
-
-        # 이후 페이지에서 추가 콘텐츠를 가져옴
-        for doc in all_documents:
-            if doc.metadata["page_number"] > page_number:
-                if current_length + len(doc.page_content) > max_length:
-                    break
-                related_content += " " + doc.page_content
-                current_length += len(doc.page_content)
-        
-        return related_content
