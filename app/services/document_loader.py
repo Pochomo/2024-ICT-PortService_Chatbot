@@ -7,7 +7,7 @@ from langchain.schema import Document
 class PDFLoader:
     def __init__(self):
         self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,  # 문서를 더 작은 크기로 분할
+            chunk_size=1200,  # 문서를 더 작은 크기로 분할
             chunk_overlap=200,
             length_function=len,
         )
@@ -26,7 +26,7 @@ class PDFLoader:
         documents = []
         try:
             with fitz.open(pdf_path) as doc:
-                for i, page in enumerate(doc):
+                for i, page in enumerate(doc.pages()):  # 페이지를 반복하기 위해 doc.pages() 사용
                     text = page.get_text()
                     clean_text = self.clean_text(text)
                     if clean_text:

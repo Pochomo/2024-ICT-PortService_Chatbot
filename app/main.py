@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles  # StaticFiles 임포트
 from app.api.v1.endpoints import chat  # chat 모듈을 임포트
 from mysql.connector import connect, Error
 import uvicorn
@@ -19,6 +20,10 @@ app.add_middleware(
     allow_methods=["*"],  # 모든 HTTP 메서드를 허용
     allow_headers=["*"],  # 모든 헤더를 허용
 )
+
+# website 디렉토리의 절대 경로 설정
+static_directory = os.path.join("C:/Users/xorkd/ChatBot/website")
+app.mount("/static", StaticFiles(directory=static_directory), name="static")
 
 # chat.py의 라우터를 포함
 app.include_router(chat.router, prefix="/api/v1")
