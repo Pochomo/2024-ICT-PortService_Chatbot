@@ -1,63 +1,49 @@
 import fitz  # PyMuPDF
 import re
 import logging
-from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.schema import Document
 
 class PDFLoader:
     def __init__(self):
-        self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1200,  # 문서를 더 작은 크기로 분할
-            chunk_overlap=200,
-            length_function=len,
-        )
         self.logger = logging.getLogger(__name__)
 
     def clean_text(self, text):
-        # 불필요한 메타데이터를 제거하는 정규 표현식
-        text = re.sub(r'\s+', ' ', text).strip()  # 여러 공백을 하나로
+        # 불필요한 메타데이터를 제거하고 여러 공백을 하나로
+        text = re.sub(r'\s+', ' ', text).strip()
         return text
 
+    def split_by_double_newline(self, text):
+        # 두 번의 줄바꿈을 기준으로 텍스트를 분리
+        paragraphs = text.split('\n\n')
+        return paragraphs
+
     def is_law_related(self, text):
+        # 법 관련 키워드가 텍스트에 포함되어 있는지 확인
         law_keywords = ["법", "제조", "조항", "시행령", "규정", "법령", "조치", "관련 법"]
         return any(keyword in text for keyword in law_keywords)
 
-    def load_and_split(self, pdf_path):
+    def load_and_split_by_paragraphs(self, pdf_path):
         documents = []
         try:
             with fitz.open(pdf_path) as doc:
-                for i, page in enumerate(doc.pages()):  # 페이지를 반복하기 위해 doc.pages() 사용
-                    text = page.get_text()
-                    clean_text = self.clean_text(text)
-                    if clean_text:
-                        # 페이지 내용을 분할하여 Document로 변환
-                        chunks = self.text_splitter.split_text(clean_text)
-                        for chunk in chunks:
-                            documents.append(Document(page_content=chunk, metadata={"page_number": i + 1}))
-            self.logger.info(f"Loaded and split {len(documents)} documents from {pdf_path}")
+                for page_num, page in enumerate(doc.pages()):
+                    # 페이지 텍스트를 가져오기
+                    page_text = page.get_text("text")
+                    page_text = self.clean_text(page_text)
+
+                    # 두 번의 줄바꿈을 기준으로 텍스트를 청크로 나누기
+                    paragraphs = self.split_by_double_newline(page_text)
+
+                    # 각 단락을 문서로 저장
+                    for paragraph in paragraphs:
+                        if paragraph:  # 빈 단락은 제외
+                            documents.append(Document(page_content=paragraph, metadata={"page_number": page_num + 1}))
+
         except Exception as e:
             self.logger.error(f"Error loading PDF {pdf_path}: {str(e)}")
+        
         return documents
 
-    def load_and_split_by_keyword(self, pdf_path, keywords):
-        documents = self.load_and_split(pdf_path)  # 기존 로드 및 분할된 문서들
-        keyword_documents = {keyword: [] for keyword in keywords}
-
-        # 키워드별로 문서 분류 및 주변 청크 포함
-        for idx, doc in enumerate(documents):
-            for keyword in keywords:
-                if keyword in doc.page_content:
-                    keyword_documents[keyword].append(doc)
-                    # 키워드 주변의 청크도 함께 묶어줍니다.
-                    if idx > 0:
-                        keyword_documents[keyword].append(documents[idx - 1])  # 이전 청크 추가
-                    if idx < len(documents) - 1:
-                        keyword_documents[keyword].append(documents[idx + 1])  # 다음 청크 추가
-                    break  # 한 문서가 여러 키워드에 중복되지 않도록 하기 위함
-
-        # 분류된 문서를 합쳐서 리턴
-        split_documents = []
-        for keyword, docs in keyword_documents.items():
-            split_documents.extend(docs)
-
-        return split_documents
+    def load_and_split(self, pdf_path):
+        # 기본적으로 두 번의 줄바꿈을 기준으로 텍스트를 청크로 분리
+        return self.load_and_split_by_paragraphs(pdf_path)
