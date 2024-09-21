@@ -1,11 +1,13 @@
 from fastapi import APIRouter, HTTPException, UploadFile, Depends, File
 from app.services.document_loader import PDFLoader
 from app.services.vector_store import VectorStore
-from app.core.config import settings
 from app.prompts.port_authority_prompt import PORT_AUTHORITY_PROMPT
-from langchain.chains import ConversationalRetrievalChain
+from app.core.config import settings
+from langchain.chains import create_retrieval_chain
+from pydantic import SecretStr
+from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_openai import ChatOpenAI
-from langchain.memory import ConversationBufferWindowMemory
+from langchain.prompts import load_prompt
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.db import models, database
@@ -14,8 +16,9 @@ from langdetect import detect
 from deep_translator import GoogleTranslator
 import tempfile
 import logging
-from typing import List
-import numpy as np
+from typing import List, Dict, Any
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.runnables import RunnablePassthrough
 
 router = APIRouter()
 
@@ -30,6 +33,10 @@ class ChatRequest(BaseModel):
 translator_ko = GoogleTranslator(source='auto', target='ko')
 translator_en = GoogleTranslator(source='auto', target='en')
 
+def format_docs(docs):
+    return "\n\n".join(doc.page_content for doc in docs)
+
+# PDF 업로드 및 벡터 저장소에 저장하는 로직
 @router.post("/upload-pdf")
 async def upload_pdf(files: List[UploadFile] = File(...)):
     logger.info(f"Received {len(files)} files")
@@ -37,21 +44,22 @@ async def upload_pdf(files: List[UploadFile] = File(...)):
 
     for file in files:
         try:
-            # 임시 파일 생성
             with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
                 temp_path = temp_file.name
                 temp_file.write(await file.read())
-            
-            if not file.filename.lower().endswith('.pdf'):
-                logger.warning(f"Invalid file type: {file.filename}")
-                continue  # 유효하지 않은 파일은 건너뜁니다.
 
+            if file.filename is None or not file.filename.lower().endswith('.pdf'):
+                logger.warning(f"Invalid file type: {file.filename}")
+                continue
+
+            # PDF 문서 로드 및 분리
             new_documents = pdf_loader.load_and_split(temp_path)
             
             if not new_documents:
                 logger.error(f"No documents were extracted from {file.filename}.")
-                continue  # 문서를 추출하지 못한 경우 건너뜁니다.
+                continue
 
+            # 법 관련 문서인지 판단하여 벡터 저장소에 추가
             for doc in new_documents:
                 is_law = pdf_loader.is_law_related(doc.page_content)
                 vector_store.add_documents([doc], is_law_related=is_law)
@@ -61,74 +69,83 @@ async def upload_pdf(files: List[UploadFile] = File(...)):
         
         except Exception as e:
             logger.error(f"Error processing file {file.filename}: {str(e)}", exc_info=True)
-            continue  # 에러가 발생한 파일은 건너뜁니다.
+            continue
 
     if not documents:
         raise HTTPException(status_code=500, detail="No valid documents were extracted from any of the files.")
 
     return {"message": f"{len(files)} files uploaded and processed successfully"}
 
-
 @router.post("/chat")
 async def chat(request: ChatRequest):
     try:
-        # Load vector stores if not already loaded
-        if vector_store.general_vector_store is None and vector_store.documents:
-            vector_store.create_vector_store()
-
+        # 메시지 언어 감지 및 한국어 번역
         input_language = detect(request.message)
         translated_text = translator_ko.translate(request.message) if input_language != 'ko' else request.message
 
-        # Check if the query is law-related
+        # 질의가 법 관련인지 확인
         is_law = vector_store.is_law_related(translated_text)
+        logger.info(f"Query classified as law-related: {is_law}")
 
-        # Perform the similarity search on the appropriate vector store
-        results = vector_store.similarity_search(translated_text, is_law_related=is_law, k=10)
-        
-        # Use the appropriate vector store (general or law) to create the retriever
+        # 벡터 저장소에서 리트리버 생성 (search_type과 k 설정)
         target_vector_store = vector_store.law_vector_store if is_law else vector_store.general_vector_store
-        retriever = target_vector_store.as_retriever()
+        logger.info(f"Using {'law' if is_law else 'general'} vector store")
 
-        # Use the ConversationalRetrievalChain to generate a response
-        conversation_chain = ConversationalRetrievalChain.from_llm(
-            llm=ChatOpenAI(temperature=0.5, openai_api_key=settings.OPENAI_API_KEY),
-            retriever=retriever,    
-            memory=ConversationBufferWindowMemory(k=3, memory_key="chat_history", return_messages=True),
-            combine_docs_chain_kwargs={"prompt": PORT_AUTHORITY_PROMPT}
+        # target_vector_store가 None인지 확인
+        if target_vector_store is None:
+            raise HTTPException(status_code=500, detail="Target vector store is not initialized.")
+
+        # as_retriever 메서드가 존재하는지 확인
+        if not hasattr(target_vector_store, 'as_retriever'):
+            raise HTTPException(status_code=500, detail="The target vector store does not have 'as_retriever' method.")
+
+        retriever = target_vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 6})
+
+        # OPENAI API 키를 가져옴 (SecretStr 타입에서 실제 값 추출)
+        api_key = settings.OPENAI_API_KEY.get_secret_value() if settings.OPENAI_API_KEY else None
+
+        # RAG 체인 설정
+        if api_key is None:
+            raise HTTPException(status_code=500, detail="OpenAI API key is not set.")
+
+        # ChatOpenAI에 문자열 값 전달
+        rag_chain = (
+            {"context": retriever | format_docs, "question": RunnablePassthrough()}
+            | PORT_AUTHORITY_PROMPT
+            | ChatOpenAI(model="gpt-4", temperature=0.5, api_key=SecretStr(api_key))
+            | StrOutputParser()
         )
 
-        response = conversation_chain.invoke({"question": translated_text})
+        # 실시간으로 체인 실행 (스트리밍)
+        response = ""
+        for chunk in rag_chain.stream(translated_text):
+            response += chunk
+            print(chunk, end="", flush=True)
 
-        translated_response = translator_en.translate(response['answer']) if input_language != 'ko' else response['answer']
+        # 응답을 원래 언어로 번역
+        translated_response = translator_en.translate(response) if input_language != 'ko' else response
 
         return {
             "answer": translated_response,
-            "source_documents": [doc.page_content for doc in response.get('source_documents', [])]
+            "is_law_related": is_law
         }
+
+    except HTTPException as e:
+        raise e
     except Exception as e:
         logger.error(f"Error in chat endpoint: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="An error occurred while processing your request.")
 
-
-@router.on_event("shutdown")
-def shutdown_event():
-    vector_store.save_local("faiss_index")
-
+# 벡터 저장소 상태 확인 엔드포인트
 @router.get("/check-vector-store")
 async def check_vector_store(is_law_related: bool = False):
     try:
-        # 선택된 벡터 스토어를 확인
-        if is_law_related:
-            target_vector_store = vector_store.law_vector_store
-            target_documents = vector_store.law_documents
-        else:
-            target_vector_store = vector_store.general_vector_store
-            target_documents = vector_store.general_documents
+        target_vector_store = vector_store.law_vector_store if is_law_related else vector_store.general_vector_store
+        target_documents = vector_store.law_documents if is_law_related else vector_store.general_documents
 
         if target_vector_store is None:
             return {"message": f"{'Law' if is_law_related else 'General'} vector store is empty"}
 
-        # 중복 제거를 위해 집합을 사용
         seen_contents = set()
         content = []
 
@@ -150,8 +167,9 @@ async def check_vector_store(is_law_related: bool = False):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
-
+@router.on_event("shutdown")
+def shutdown_event():
+    vector_store.save_local("faiss_index")
 
 def get_db():
     db = database.SessionLocal()
@@ -162,9 +180,8 @@ def get_db():
 
 @router.post("/get-info")
 async def get_info(button_name: str, db: Session = Depends(get_db)):
-    button_name = unquote(button_name)  # URL 인코딩된 문자열을 디코딩
+    button_name = unquote(button_name)
     try:
-        # MySQL에서 button_name과 일치하는 정보를 검색
         information = db.query(models.Information).filter(models.Information.button_name == button_name).first()
         
         if not information:
@@ -172,16 +189,14 @@ async def get_info(button_name: str, db: Session = Depends(get_db)):
         
         return {
             "message": information.response_text,
-            "link": information.link  # 필요시 링크도 반환 가능
+            "link": information.link
         }
-    
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
 
 @router.post("/endpoint")
 async def get_info_by_title(infoType: str, db: Session = Depends(get_db)):
     try:
-        # MySQL에서 infoType과 일치하는 정보를 검색
         information = db.query(models.Information).filter(models.Information.title == infoType).first()
         
         if not information:
@@ -189,8 +204,7 @@ async def get_info_by_title(infoType: str, db: Session = Depends(get_db)):
         
         return {
             "message": information.content,
-            "options": []  # 추가적인 옵션이 있다면 여기에 추가 가능
+            "options": []
         }
-    
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
