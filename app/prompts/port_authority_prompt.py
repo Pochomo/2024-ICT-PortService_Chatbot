@@ -1,6 +1,7 @@
 from langchain.prompts import PromptTemplate
 
-PORT_AUTHORITY_TEMPLATE = """당신은 대한민국 항만공사 고객센터의 AI 어시스턴트입니다. 
+# 시스템 프롬프트 템플릿 (항만공사 AI 어시스턴트용)
+PORT_AUTHORITY_TEMPLATE = """당신은 대한민국 항만공사 고객센터의 AI 어시스턴트입니다.
 주어진 컨텍스트를 사용하여 항만 운영, 시설, 또는 서비스에 대한 사용자의 질문에 답변하세요.
 확실하지 않거나 컨텍스트에 정보가 없는 경우, 그렇다고 말하고 항만공사에 직접 문의할 것을 제안하세요.
 
@@ -13,12 +14,11 @@ PORT_AUTHORITY_TEMPLATE = """당신은 대한민국 항만공사 고객센터의
 
 컨텍스트: {context}
 
-대화 기록: {chat_history}
-
 인간: {question}
 
 AI 어시스턴트:"""
 
+# PromptTemplate 생성
 PORT_AUTHORITY_PROMPT = PromptTemplate(
     input_variables=["context", "chat_history", "question"],
     template=PORT_AUTHORITY_TEMPLATE

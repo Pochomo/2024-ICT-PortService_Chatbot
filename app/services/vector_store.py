@@ -1,25 +1,21 @@
 import os
-import numpy as np
-import faiss  # FAISS 라이브러리 직접 사용
 import logging
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_community.vectorstores import FAISS as LangchainFAISS
-from langchain_community.docstore.in_memory import InMemoryDocstore
+from langchain_chroma import Chroma
+from langchain_openai import OpenAIEmbeddings
+from langchain_community.vectorstores import FAISS
 
 class VectorStore:
     def __init__(self):
-        self.embedding_model = HuggingFaceEmbeddings(model_name="sentence-transformers/paraphrase-MiniLM-L6-v2")
+        # OpenAI 임베딩 모델 초기화
+        self.embedding_model = OpenAIEmbeddings()
         self.general_vector_store = None
         self.law_vector_store = None
         self.general_documents = []
         self.law_documents = []
         self.logger = logging.getLogger(__name__)
-        self.dimension = None
 
     def add_documents(self, documents, is_law_related=False):
         target_documents = self.law_documents if is_law_related else self.general_documents
-        target_vector_store = self.law_vector_store if is_law_related else self.general_vector_store
-
         unique_documents = []
         seen = set()
 
@@ -30,53 +26,36 @@ class VectorStore:
                 seen.add(content_hash)
         
         if unique_documents:
-            embeddings = self.embedding_model.embed_documents([doc.page_content for doc in unique_documents])
-            embeddings = np.array(embeddings, dtype=np.float32)
-            
-            if self.dimension is None:
-                self.dimension = embeddings.shape[1]
-            elif embeddings.shape[1] != self.dimension:
-                raise ValueError(f"Dimension mismatch: expected {self.dimension}, but got {embeddings.shape[1]}")
-            
             target_documents.extend(unique_documents)
             self.logger.info(f"Added {len(unique_documents)} unique documents to the {'law' if is_law_related else 'general'} vector store.")
+            # 벡터 스토어 생성
             self.create_vector_store(is_law_related)
 
     def create_vector_store(self, is_law_related=False):
         target_documents = self.law_documents if is_law_related else self.general_documents
-        target_vector_store = self.law_vector_store if is_law_related else self.general_vector_store
 
-        texts = [doc.page_content for doc in target_documents]
-        embeddings = self.embedding_model.embed_documents(texts)
-        embeddings = np.array(embeddings, dtype=np.float32)
-
-        if self.dimension is None:
-            self.dimension = embeddings.shape[1]
-        elif embeddings.shape[1] != self.dimension:
-            raise ValueError(f"Dimension mismatch: expected {self.dimension}, but got {embeddings.shape[1]}")
+        # Chroma 벡터 스토어 생성
+        vector_store = Chroma.from_documents(documents=target_documents, embedding=self.embedding_model)
         
-        new_vector_store = faiss.IndexFlatL2(self.dimension)
-        new_vector_store.add(embeddings)
-        
-        docstore = InMemoryDocstore({i: doc for i, doc in enumerate(target_documents)})
-        index_to_docstore_id = {i: i for i in range(len(target_documents))}
-
         if is_law_related:
-            self.law_vector_store = LangchainFAISS(
-                index=new_vector_store,
-                docstore=docstore,
-                index_to_docstore_id=index_to_docstore_id,
-                embedding_function=self.embedding_model
-            )
+            self.law_vector_store = vector_store
         else:
-            self.general_vector_store = LangchainFAISS(
-                index=new_vector_store,
-                docstore=docstore,
-                index_to_docstore_id=index_to_docstore_id,
-                embedding_function=self.embedding_model
-            )
+            self.general_vector_store = vector_store
 
-        self.logger.info(f"{'Law' if is_law_related else 'General'} vector store created with {len(target_documents)} documents and dimension {self.dimension}.")
+        self.logger.info(f"{'Law' if is_law_related else 'General'} vector store created with {len(target_documents)} documents.")
+
+    def as_retriever(self, is_law_related=False, k=8):
+        # 벡터 스토어를 선택
+        target_vector_store = self.law_vector_store if is_law_related else self.general_vector_store
+        
+        # 벡터 스토어가 초기화되어 있는지 확인
+        if target_vector_store is None:
+            store_type = "law" if is_law_related else "general"
+            self.logger.error(f"{store_type.capitalize()} vector store is not initialized.")
+            raise ValueError(f"{store_type.capitalize()} vector store is not initialized.")
+        
+        # 리트리버 생성
+        return target_vector_store.as_retriever(search_type="similarity", search_kwargs={"k": k})
 
     def similarity_search(self, query, is_law_related=False, k=8):
         target_vector_store = self.law_vector_store if is_law_related else self.general_vector_store
@@ -84,70 +63,23 @@ class VectorStore:
         if target_vector_store is None:
             raise ValueError("Vector store is not initialized")
         
-        query_embedding = self.embedding_model.embed_query(query)
-        query_embedding = np.array(query_embedding, dtype=np.float32).reshape(1, -1)
+        # Perform the similarity search directly using the retriever
+        retriever = target_vector_store.as_retriever(search_kwargs={"k": k})
+        docs = retriever.get_relevant_documents(query)
         
-        query_dim = query_embedding.shape[1]
-        index_dim = target_vector_store.index.d
-        self.logger.info(f"Query embedding dimension: {query_dim}, Index dimension: {index_dim}")
-        
-        if query_dim != index_dim:
-            raise ValueError(f"Dimension mismatch: Query embedding dimension {query_dim} does not match FAISS index dimension {index_dim}")
-        
-        distances, indices = target_vector_store.index.search(query_embedding, k)
-        
-        # Use the correct method to retrieve documents from the docstore using the index
-        results = [target_vector_store.docstore.search(i) for i in indices[0]]
-        
-        if not results:
+        if not docs:
             raise ValueError("No results found for the query.")
         
-        return results
+        return docs
+
     def is_law_related(self, text):
-        """
-        텍스트가 법과 관련이 있는지 확인하는 메소드.
-        법 관련 키워드가 포함되어 있는지 여부를 기준으로 판단합니다.
-        """
         law_keywords = ["법", "조항", "규정", "제한", "법률", "조례", "규칙", "정관"]
         return any(keyword in text for keyword in law_keywords)
 
     def save_local(self, path, is_law_related=False):
-        target_vector_store = self.law_vector_store if is_law_related else self.general_vector_store
-
-        if target_vector_store is None:
-            raise ValueError(f"{'Law' if is_law_related else 'General'} vector store is not initialized")
-        
-        faiss.write_index(target_vector_store.index, path)
-        self.logger.info(f"{'Law' if is_law_related else 'General'} vector store saved to {path}.")
+        # Chroma는 기본적으로 별도의 저장 방법을 제공하지 않으므로 생략하거나 필요할 경우 로컬 저장소 옵션을 구현
+        self.logger.warning("Chroma does not support direct save/load operations like FAISS.")
 
     def load_local(self, path, is_law_related=False):
-        if os.path.exists(path):
-            new_vector_store = faiss.read_index(path)
-            self.logger.info(f"{'Law' if is_law_related else 'General'} vector store loaded from {path}.")
-            
-            target_documents = self.law_documents if is_law_related else self.general_documents
-            docstore = InMemoryDocstore({i: doc for i, doc in enumerate(target_documents)})
-            index_to_docstore_id = {i: i for i in range(len(target_documents))}
-            
-            if is_law_related:
-                self.law_vector_store = LangchainFAISS(
-                    index=new_vector_store,
-                    docstore=docstore,
-                    index_to_docstore_id=index_to_docstore_id,
-                    embedding_function=self.embedding_model
-                )
-            else:
-                self.general_vector_store = LangchainFAISS(
-                    index=new_vector_store,
-                    docstore=docstore,
-                    index_to_docstore_id=index_to_docstore_id,
-                    embedding_function=self.embedding_model
-                )
-        else:
-            self.logger.warning(f"No existing index found at {path}. Starting with an empty index.")
-            new_vector_store = faiss.IndexFlatL2(self.dimension) if self.dimension else None
-
-            if is_law_related:
-                self.law_vector_store = new_vector_store
-            else:
-                self.general_vector_store = new_vector_store
+        # Chroma 벡터 스토어는 로컬에서 바로 불러오는 옵션이 없습니다. 필요 시 다시 임베딩을 통해 생성 필요
+        self.logger.warning("Chroma does not support direct save/load operations like FAISS.")
