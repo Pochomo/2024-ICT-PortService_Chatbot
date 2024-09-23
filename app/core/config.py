@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     DB_NAME: Optional[str] = os.getenv("DB_NAME")
     ELASTICSEARCH_HOST: Optional[str] = os.getenv("ELASTICSEARCH_HOST")
     ELASTICSEARCH_PORT: Optional[str] = os.getenv("ELASTICSEARCH_PORT")
-
+    RDB_URL: Optional[str] = os.getenv("RDB_URL")
     class Config:
         env_file = ".env"
 
@@ -29,3 +29,4 @@ if settings.OPENAI_API_KEY:
     openai_api_key = settings.OPENAI_API_KEY.get_secret_value()  # SecretStr에서 실제 값을 추출
 else:
     openai_api_key = None
+

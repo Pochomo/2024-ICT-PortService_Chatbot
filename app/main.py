@@ -3,14 +3,23 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles  # StaticFiles 임포트
 from app.api.v1.endpoints import chat  # chat 모듈을 임포트
 from mysql.connector import connect, Error
+from dotenv import load_dotenv
 import uvicorn
 import os
 
+from fastapi import FastAPI, Depends
+from app.rdb import engine, Base, get_rdb
+from app.rdb.models import User, Form, VisitBadge
+
+load_dotenv()
 # 환경 변수 설정
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 # FastAPI 애플리케이션 인스턴스 생성
 app = FastAPI()
+
+# 데이터베이스 테이블 생성
+Base.metadata.create_all(bind=engine)
 
 # CORS 설정
 app.add_middleware(

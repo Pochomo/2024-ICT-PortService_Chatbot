@@ -1,8 +1,9 @@
 from fastapi import APIRouter, HTTPException, UploadFile, Depends, File
-from app.services.document_loader import PDFLoader
+from langchain_community.document_loaders import PyPDFLoader
 from app.services.vector_store import VectorStore
 from app.prompts.port_authority_prompt import PORT_AUTHORITY_PROMPT
 from app.core.config import settings
+
 from langchain.chains import create_retrieval_chain
 from pydantic import SecretStr
 from langchain.chains.combine_documents import create_stuff_documents_chain
@@ -17,12 +18,14 @@ from deep_translator import GoogleTranslator
 import tempfile
 import logging
 from typing import List, Dict, Any
+
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
 
+
 router = APIRouter()
 
-pdf_loader = PDFLoader()
+pdf_loader = PyPDFLoader("/Users/whtjdqlsqp/Public/Drop Box/dbpdf/Port_DB.pdf")
 vector_store = VectorStore()
 
 logger = logging.getLogger(__name__)
@@ -33,8 +36,10 @@ class ChatRequest(BaseModel):
 translator_ko = GoogleTranslator(source='auto', target='ko')
 translator_en = GoogleTranslator(source='auto', target='en')
 
+
 def format_docs(docs):
     return "\n\n".join(doc.page_content for doc in docs)
+
 
 # PDF 업로드 및 벡터 저장소에 저장하는 로직
 @router.post("/upload-pdf")
@@ -76,6 +81,7 @@ async def upload_pdf(files: List[UploadFile] = File(...)):
 
     return {"message": f"{len(files)} files uploaded and processed successfully"}
 
+
 @router.post("/chat")
 async def chat(request: ChatRequest):
     try:
@@ -88,8 +94,10 @@ async def chat(request: ChatRequest):
         logger.info(f"Query classified as law-related: {is_law}")
 
         # 벡터 저장소에서 리트리버 생성 (search_type과 k 설정)
+
         target_vector_store = vector_store.law_vector_store if is_law else vector_store.general_vector_store
         logger.info(f"Using {'law' if is_law else 'general'} vector store")
+
 
         # target_vector_store가 None인지 확인
         if target_vector_store is None:
@@ -124,6 +132,7 @@ async def chat(request: ChatRequest):
 
         # 응답을 원래 언어로 번역
         translated_response = translator_en.translate(response) if input_language != 'ko' else response
+
 
         return {
             "answer": translated_response,
