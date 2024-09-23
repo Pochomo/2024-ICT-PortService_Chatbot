@@ -30,8 +30,9 @@ app.add_middleware(
     allow_headers=["*"],  # 모든 헤더를 허용
 )
 
-# website 디렉토리의 절대 경로 설정
-static_directory = os.path.join("C:/Users/xorkd/ChatBot/website")
+# 현재 파일의 디렉토리를 기준으로 상대 경로 사용
+current_dir = os.path.dirname(os.path.abspath(__file__))
+static_directory = os.path.join(current_dir, "..", "static")
 app.mount("/static", StaticFiles(directory=static_directory), name="static")
 
 # chat.py의 라우터를 포함
