@@ -3,7 +3,7 @@ from app.services.document_loader import PDFLoader
 from app.services.vector_store import VectorStore
 from app.prompts.port_authority_prompt import PORT_AUTHORITY_PROMPT
 from app.core.config import settings
-from langchain.chains import create_retrieval_chain
+from langchain.chains.retrieval import create_retrieval_chain
 from pydantic import SecretStr
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_openai import ChatOpenAI
@@ -87,43 +87,35 @@ async def chat(request: ChatRequest):
         is_law = vector_store.is_law_related(translated_text)
         logger.info(f"Query classified as law-related: {is_law}")
 
-        # 벡터 저장소에서 리트리버 생성 (search_type과 k 설정)
+        # 벡터 저장소에서 리트리버 생성
         target_vector_store = vector_store.law_vector_store if is_law else vector_store.general_vector_store
         logger.info(f"Using {'law' if is_law else 'general'} vector store")
 
-        # target_vector_store가 None인지 확인
         if target_vector_store is None:
             raise HTTPException(status_code=500, detail="Target vector store is not initialized.")
 
-        # as_retriever 메서드가 존재하는지 확인
-        if not hasattr(target_vector_store, 'as_retriever'):
-            raise HTTPException(status_code=500, detail="The target vector store does not have 'as_retriever' method.")
+        retriever = target_vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 4})
 
-        retriever = target_vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 6})
-
-        # OPENAI API 키를 가져옴 (SecretStr 타입에서 실제 값 추출)
+        # OPENAI API 키를 가져옴
         api_key = settings.OPENAI_API_KEY.get_secret_value() if settings.OPENAI_API_KEY else None
-
-        # RAG 체인 설정
         if api_key is None:
             raise HTTPException(status_code=500, detail="OpenAI API key is not set.")
 
-        # ChatOpenAI에 문자열 값 전달
+        # RAG 체인 설정 및 실행
         rag_chain = (
             {"context": retriever | format_docs, "question": RunnablePassthrough()}
             | PORT_AUTHORITY_PROMPT
-            | ChatOpenAI(model="gpt-4", temperature=0.5, api_key=SecretStr(api_key))
+            | ChatOpenAI(model="gpt-3.5-turbo", temperature=0.5, api_key=SecretStr(api_key))
             | StrOutputParser()
         )
 
-        # 실시간으로 체인 실행 (스트리밍)
-        response = ""
-        for chunk in rag_chain.stream(translated_text):
-            response += chunk
-            print(chunk, end="", flush=True)
+        response = rag_chain.invoke(translated_text)
+
+        # 응답 포맷팅
+        formatted_response = "\n\n".join(paragraph.strip() for paragraph in response.split('\n') if paragraph.strip())
 
         # 응답을 원래 언어로 번역
-        translated_response = translator_en.translate(response) if input_language != 'ko' else response
+        translated_response = translator_en.translate(formatted_response) if input_language != 'ko' else formatted_response
 
         return {
             "answer": translated_response,
