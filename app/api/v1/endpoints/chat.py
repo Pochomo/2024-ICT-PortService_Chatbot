@@ -18,6 +18,7 @@ from deep_translator import GoogleTranslator
 import tempfile
 import logging
 from typing import List, Dict, Any
+import os
 
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
@@ -25,7 +26,6 @@ from langchain_core.runnables import RunnablePassthrough
 
 router = APIRouter()
 
-pdf_loader = PyPDFLoader("/Users/whtjdqlsqp/Public/Drop Box/dbpdf/Port_DB.pdf")
 vector_store = VectorStore()
 
 logger = logging.getLogger(__name__)
@@ -39,6 +39,12 @@ translator_en = GoogleTranslator(source='auto', target='en')
 
 def format_docs(docs):
     return "\n\n".join(doc.page_content for doc in docs)
+
+
+def is_law_related(text: str) -> bool:
+    # 여기에 법률 관련 문서인지 판단하는 로직을 구현합니다.
+    law_keywords = ["법률", "법규", "조항", "규정", "법적", "법원", "소송"]
+    return any(keyword in text for keyword in law_keywords)
 
 
 # PDF 업로드 및 벡터 저장소에 저장하는 로직
@@ -58,7 +64,8 @@ async def upload_pdf(files: List[UploadFile] = File(...)):
                 continue
 
             # PDF 문서 로드 및 분리
-            new_documents = pdf_loader.load_and_split(temp_path)
+            pdf_loader = PyPDFLoader(temp_path)
+            new_documents = pdf_loader.load_and_split()
             
             if not new_documents:
                 logger.error(f"No documents were extracted from {file.filename}.")
@@ -66,7 +73,7 @@ async def upload_pdf(files: List[UploadFile] = File(...)):
 
             # 법 관련 문서인지 판단하여 벡터 저장소에 추가
             for doc in new_documents:
-                is_law = pdf_loader.is_law_related(doc.page_content)
+                is_law = is_law_related(doc.page_content)
                 vector_store.add_documents([doc], is_law_related=is_law)
             
             logger.info(f"Processed {len(new_documents)} documents from {file.filename}")
@@ -74,7 +81,9 @@ async def upload_pdf(files: List[UploadFile] = File(...)):
         
         except Exception as e:
             logger.error(f"Error processing file {file.filename}: {str(e)}", exc_info=True)
-            continue
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
 
     if not documents:
         raise HTTPException(status_code=500, detail="No valid documents were extracted from any of the files.")
@@ -90,14 +99,12 @@ async def chat(request: ChatRequest):
         translated_text = translator_ko.translate(request.message) if input_language != 'ko' else request.message
 
         # 질의가 법 관련인지 확인
-        is_law = vector_store.is_law_related(translated_text)
+        is_law = is_law_related(translated_text)
         logger.info(f"Query classified as law-related: {is_law}")
 
         # 벡터 저장소에서 리트리버 생성 (search_type과 k 설정)
-
         target_vector_store = vector_store.law_vector_store if is_law else vector_store.general_vector_store
         logger.info(f"Using {'law' if is_law else 'general'} vector store")
-
 
         # target_vector_store가 None인지 확인
         if target_vector_store is None:
@@ -132,7 +139,6 @@ async def chat(request: ChatRequest):
 
         # 응답을 원래 언어로 번역
         translated_response = translator_en.translate(response) if input_language != 'ko' else response
-
 
         return {
             "answer": translated_response,
