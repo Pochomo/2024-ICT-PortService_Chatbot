@@ -18,7 +18,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 # FastAPI 애플리케이션 인스턴스 생성
 app = FastAPI()
 
-# # 데이터베이스 테이블 생성
+# #데이터베이스 테이블 생성
 # Base.metadata.create_all(bind=engine)
 
 # CORS 설정
@@ -33,7 +33,7 @@ app.add_middleware(
 # 현재 파일의 디렉토리를 기준으로 상대 경로 사용
 current_dir = os.path.dirname(os.path.abspath(__file__))
 static_directory = os.path.join(current_dir, "..", "static")
-app.mount("/static", StaticFiles(directory=static_directory), name="static")
+#app.mount("/static", StaticFiles(directory=static_directory), name="static")
 
 # chat.py의 라우터를 포함
 app.include_router(chat.router, prefix="/api/v1")

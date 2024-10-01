@@ -22,7 +22,6 @@ import os
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
 
-
 router = APIRouter()
 
 vector_store = VectorStore()
@@ -35,19 +34,9 @@ class ChatRequest(BaseModel):
 translator_ko = GoogleTranslator(source='auto', target='ko')
 translator_en = GoogleTranslator(source='auto', target='en')
 
-
 def format_docs(docs):
     return "\n\n".join(doc.page_content for doc in docs)
 
-
-def is_law_related(text: str) -> bool:
-    # 여기에 법률 관련 문서인지 판단하는 로직을 구현합니다.
-    law_keywords = ["법률", "법규", "조항", "규정", "법적", "법원", "소송"]
-    return any(keyword in text for keyword in law_keywords)
-
-
-# PDF 업로드 및 벡터 저장소에 저장하는 로직
-@router.post("/upload-pdf")
 @router.post("/upload-pdf")
 async def upload_pdf(files: List[UploadFile] = File(...)):
     logger.info(f"Received {len(files)} files")
@@ -72,12 +61,13 @@ async def upload_pdf(files: List[UploadFile] = File(...)):
                 logger.error(f"No documents were extracted from {file.filename}.")
                 continue
 
-            # 법 관련 문서인지 판단하여 벡터 저장소에 추가
-            for doc in new_documents:
-                is_law = is_law_related(doc.page_content)
-                vector_store.add_documents([doc], is_law_related=is_law)
+            # 파일 이름에 'law'가 포함되어 있는지 확인
+            is_law = 'law' in file.filename.lower()
             
-            logger.info(f"Processed {len(new_documents)} documents from {file.filename}")
+            # 벡터 저장소에 문서 추가
+            vector_store.add_documents(new_documents, is_law_related=is_law)
+            
+            logger.info(f"Processed {len(new_documents)} documents from {file.filename}. Is law related: {is_law}")
             documents.extend(new_documents)
         
         except Exception as e:
@@ -89,8 +79,10 @@ async def upload_pdf(files: List[UploadFile] = File(...)):
     if not documents:
         raise HTTPException(status_code=500, detail="No valid documents were extracted from any of the files.")
 
-    return {"message": f"{len(files)} files uploaded and processed successfully"}
+    # 기존 문서 정제 및 중복 제거
+    vector_store.clean_existing_documents()
 
+    return {"message": f"{len(files)} files uploaded and processed successfully"}
 
 @router.post("/chat")
 async def chat(request: ChatRequest):
@@ -99,18 +91,24 @@ async def chat(request: ChatRequest):
         input_language = detect(request.message)
         translated_text = translator_ko.translate(request.message) if input_language != 'ko' else request.message
 
-        # 질의가 법 관련인지 확인
-        is_law = is_law_related(translated_text)
-        logger.info(f"Query classified as law-related: {is_law}")
+        # 질문이 법률 관련인지 확인
+        law_keywords = ["법", "규율", "조항", "규정", "법적", "항만공사법", "조례"]
+        is_law_related = any(keyword in translated_text for keyword in law_keywords)
 
-        # 벡터 저장소에서 리트리버 생성 (search_type과 k 설정)
-        target_vector_store = vector_store.law_vector_store if is_law else vector_store.general_vector_store
-        logger.info(f"Using {'law' if is_law else 'general'} vector store")
+        # 벡터 저장소 선택 및 검색
+        docs = []
+        if is_law_related and vector_store.law_vector_store:
+            law_retriever = vector_store.law_vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 4})
+            docs = law_retriever.get_relevant_documents(translated_text)
 
-        if target_vector_store is None:
-            raise HTTPException(status_code=500, detail="Target vector store is not initialized.")
+        # 법률 관련 문서가 충분하지 않으면 일반 벡터 저장소에서도 검색
+        if len(docs) < 2 and vector_store.general_vector_store:
+            general_retriever = vector_store.general_vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 4})
+            general_docs = general_retriever.get_relevant_documents(translated_text)
+            docs.extend(general_docs)
 
-        retriever = target_vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 4})
+        if not docs:
+            return {"answer": "죄송합니다. 관련된 정보를 찾을 수 없습니다.", "is_law_related": is_law_related}
 
         # OPENAI API 키를 가져옴
         api_key = settings.OPENAI_API_KEY.get_secret_value() if settings.OPENAI_API_KEY else None
@@ -119,7 +117,7 @@ async def chat(request: ChatRequest):
 
         # RAG 체인 설정 및 실행
         rag_chain = (
-            {"context": retriever | format_docs, "question": RunnablePassthrough()}
+            {"context": RunnablePassthrough() | (lambda x: format_docs(docs)), "question": RunnablePassthrough()}
             | PORT_AUTHORITY_PROMPT
             | ChatOpenAI(model="gpt-3.5-turbo", temperature=0.5, api_key=SecretStr(api_key))
             | StrOutputParser()
@@ -135,7 +133,7 @@ async def chat(request: ChatRequest):
 
         return {
             "answer": translated_response,
-            "is_law_related": is_law
+            "is_law_related": is_law_related
         }
 
     except HTTPException as e:
@@ -143,8 +141,7 @@ async def chat(request: ChatRequest):
     except Exception as e:
         logger.error(f"Error in chat endpoint: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="An error occurred while processing your request.")
-
-# 벡터 저장소 상태 확인 엔드포인트
+    
 @router.get("/check-vector-store")
 async def check_vector_store(is_law_related: bool = False):
     try:
