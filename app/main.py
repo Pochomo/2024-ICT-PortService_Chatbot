@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles  # StaticFiles 임포트
 from app.api.v1.endpoints import chat  # chat 모듈을 임포트
 from mysql.connector import connect, Error
@@ -8,8 +9,8 @@ import uvicorn
 import os
 
 from fastapi import FastAPI, Depends
-from app.rdb import engine, Base, get_rdb
-from app.rdb.models import User, Form, VisitBadge
+# from app.rdb import engine, Base, get_rdb
+# from app.rdb.models import User, Form, VisitBadge
 
 load_dotenv()
 # 환경 변수 설정
@@ -19,7 +20,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 app = FastAPI()
 
 # 데이터베이스 테이블 생성
-Base.metadata.create_all(bind=engine)
+# Base.metadata.create_all(bind=engine)
 
 # CORS 설정
 app.add_middleware(
@@ -32,7 +33,8 @@ app.add_middleware(
 
 # 현재 파일의 디렉토리를 기준으로 상대 경로 사용
 current_dir = os.path.dirname(os.path.abspath(__file__))
-static_directory = os.path.join(current_dir, "..", "static")
+static_directory = os.path.join(current_dir, "..", "public")
+# static_directory = os.path.join(current_dir, "..", "static")
 app.mount("/static", StaticFiles(directory=static_directory), name="static")
 
 # chat.py의 라우터를 포함
@@ -62,6 +64,11 @@ async def check_db_connection():
         return {"status": "Database connection successful"}
     except HTTPException as e:
         return {"status": str(e.detail)}
+
+# /contest-entry로 들어오면 index.html로 리다이렉트
+@app.get("/contest-entry", response_class=HTMLResponse)
+async def serve_index():
+    return RedirectResponse(url="/static/index.html")
 
 # main 함수: uvicorn 서버 실행
 if __name__ == "__main__":
