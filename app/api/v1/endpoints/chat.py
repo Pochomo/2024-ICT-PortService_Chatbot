@@ -212,4 +212,4 @@ async def get_info_by_title(infoType: str, db: Session = Depends(get_db)):
             "options": []
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")  

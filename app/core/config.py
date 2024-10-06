@@ -17,7 +17,8 @@ class Settings(BaseSettings):
     DB_NAME: Optional[str] = os.getenv("DB_NAME")
     ELASTICSEARCH_HOST: Optional[str] = os.getenv("ELASTICSEARCH_HOST")
     ELASTICSEARCH_PORT: Optional[str] = os.getenv("ELASTICSEARCH_PORT")
-    #RDB_URL: Optional[str] = os.getenv("RDB_URL")
+    RDB_URL: Optional[str] = os.getenv("RDB_URL")
+    
     class Config:
         env_file = ".env"
 
