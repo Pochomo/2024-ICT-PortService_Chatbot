@@ -5,7 +5,7 @@ from . import models, schemas
 
 logger = logging.getLogger(__name__)
 # 유저 생성 함수
-def create_user(db: Session, user: schemas.UserCreate):
+def create_user(db: Session, user: schemas.User):
     fake_hashed_password = user.password + "notreallyhashed"  # 실제로는 해싱을 사용해야 함
     db_user = models.User(username=user.username, email=user.email, hashed_password=fake_hashed_password)
     db.add(db_user)

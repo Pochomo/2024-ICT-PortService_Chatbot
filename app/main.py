@@ -34,7 +34,7 @@ app = FastAPI()
 
 
 # 데이터베이스 테이블 생성
-# Base.metadata.create_all(bind=engine)
+Base.metadata.create_all(bind=engine)
 rdb_Base.metadata.create_all(bind=rdb_engine)
 
 
@@ -50,7 +50,7 @@ app.add_middleware(
 # 현재 파일의 디렉토리를 기준으로 상대 경로 사용
 current_dir = os.path.dirname(os.path.abspath(__file__))
 static_directory = os.path.join(current_dir, "..", "static")
-#app.mount("/static", StaticFiles(directory=static_directory), name="static")
+app.mount("/static", StaticFiles(directory=static_directory), name="static")
 
 # chat.py의 라우터를 포함
 
