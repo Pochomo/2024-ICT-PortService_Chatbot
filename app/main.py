@@ -1,17 +1,28 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
+
 from fastapi.responses import RedirectResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles  # StaticFiles 임포트
 from app.api.v1.endpoints import chat  # chat 모듈을 임포트
+
+from fastapi.staticfiles import StaticFiles
+from app.api.v1.endpoints import chat
+
 from mysql.connector import connect, Error
+from sqlalchemy.orm import Session
+from app.rdb import engine as rdb_engine, Base as rdb_Base, get_rdb
+from app.rdb.models import User, Form, VisitBadge
+from app.rdb import crud, schemas
 from dotenv import load_dotenv
 import uvicorn
 import os
 
-from fastapi import FastAPI, Depends
-# from app.rdb import engine, Base, get_rdb
-# from app.rdb.models import User, Form, VisitBadge
+from app.rdb import engine, Base, get_rdb
+from app.rdb.models import User, Form, VisitBadge
 
+
+
+from pydantic import ValidationError
 load_dotenv()
 # 환경 변수 설정
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -19,16 +30,21 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 # FastAPI 애플리케이션 인스턴스 생성
 app = FastAPI()
 
-# #데이터베이스 테이블 생성
+
+
+
+# 데이터베이스 테이블 생성
 # Base.metadata.create_all(bind=engine)
+rdb_Base.metadata.create_all(bind=rdb_engine)
+
 
 # CORS 설정
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 모든 도메인에 대해 허용
+    allow_origins=["http://localhost:3000"],
     allow_credentials=True,
-    allow_methods=["*"],  # 모든 HTTP 메서드를 허용
-    allow_headers=["*"],  # 모든 헤더를 허용
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # 현재 파일의 디렉토리를 기준으로 상대 경로 사용
@@ -40,7 +56,29 @@ static_directory = os.path.join(current_dir, "..", "static")
 
 app.include_router(chat.router, prefix="/api/v1")
 
-# 데이터베이스 연결 함수
+@app.get("/api/v1/forms/{form_id}")
+async def get_form(form_id: int, db: Session = Depends(get_rdb)):
+    form = db.query(Form).filter(Form.id == form_id).first()
+    
+    if form is None:
+        raise HTTPException(status_code=404, detail="Form not found")
+    return {
+        "id": form.id,
+        "title": form.title,
+        "description": form.description,
+        "fields": form.fields
+    }
+
+
+@app.post("/api/v1/submit-form")
+async def submit_form(request: Request, visit_badge: schemas.VisitBadgeCreate, db: Session = Depends(get_rdb)):
+    body = await request.json()
+    try:
+        db_visit_badge = crud.create_visit_badge(db=db, visit_badge=visit_badge)
+        return db_visit_badge
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
 def get_database_connection():
     try:
         connection = connect(
@@ -49,7 +87,7 @@ def get_database_connection():
             password=os.getenv("DB_PASSWORD"),
             database=os.getenv("DB_NAME")
         )
-        print("Database connection successful")  # 연결 성공 시 메시지 출력
+        print("Database connection successful")
         return connection
     except Error as e:
         print(f"Error connecting to MySQL Platform: {e}")
@@ -64,6 +102,25 @@ async def check_db_connection():
         return {"status": "Database connection successful"}
     except HTTPException as e:
         return {"status": str(e.detail)}
+    
+def get_rdb_connection():
+    try:
+        connection = connect(
+            DATABASE_URL = os.getenv('RDB_URL')
+        )
+        print("rdb connection successful")
+        return connection
+    except Error as e:
+        print(f"Error connecting to MySQL Platform: {e}")
+        raise HTTPException(status_code=500, detail="rdb connection failed")
+    
+@app.get("/check-rdb-connection")
+async def check_rdb_connection(db: Session = Depends(get_rdb)):
+    try:
+        db.execute("SELECT 1")
+        return {"status": "Database connection successful (AWS RDS)"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Database connection failed")
 
 # /contest-entry로 들어오면 index.html로 리다이렉트
 @app.get("/contest-entry", response_class=HTMLResponse)
