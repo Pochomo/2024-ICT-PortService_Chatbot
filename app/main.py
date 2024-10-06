@@ -49,7 +49,7 @@ app.add_middleware(
 
 # 현재 파일의 디렉토리를 기준으로 상대 경로 사용
 current_dir = os.path.dirname(os.path.abspath(__file__))
-static_directory = os.path.join(current_dir, "..", "static")
+static_directory = os.path.join(current_dir, "..", "public")
 app.mount("/static", StaticFiles(directory=static_directory), name="static")
 
 # chat.py의 라우터를 포함
@@ -122,10 +122,17 @@ async def check_rdb_connection(db: Session = Depends(get_rdb)):
     except Exception as e:
         raise HTTPException(status_code=500, detail="Database connection failed")
 
-# /contest-entry로 들어오면 index.html로 리다이렉트
+# Contest Entry 페이지를 제공하는 엔드포인트
 @app.get("/contest-entry", response_class=HTMLResponse)
 async def serve_index():
-    return RedirectResponse(url="/static/index.html")
+    index_path = os.path.join(static_directory, "index.html")
+    print(f"Serving file from: {index_path}")  # 파일 경로를 출력하여 확인
+    try:
+        with open(index_path, "r", encoding="utf-8") as file:
+            return HTMLResponse(content=file.read())
+    except FileNotFoundError:
+        print(f"Error: File {index_path} not found")  # 오류 로그 추가
+        raise HTTPException(status_code=404, detail="index.html file not found")
 
 # main 함수: uvicorn 서버 실행
 if __name__ == "__main__":
