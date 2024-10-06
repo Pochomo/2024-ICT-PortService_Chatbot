@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles  # StaticFiles 임포트
 from app.api.v1.endpoints import chat  # chat 모듈을 임포트
 from mysql.connector import connect, Error
@@ -36,6 +37,7 @@ static_directory = os.path.join(current_dir, "..", "static")
 #app.mount("/static", StaticFiles(directory=static_directory), name="static")
 
 # chat.py의 라우터를 포함
+
 app.include_router(chat.router, prefix="/api/v1")
 
 # 데이터베이스 연결 함수
@@ -62,6 +64,11 @@ async def check_db_connection():
         return {"status": "Database connection successful"}
     except HTTPException as e:
         return {"status": str(e.detail)}
+
+# /contest-entry로 들어오면 index.html로 리다이렉트
+@app.get("/contest-entry", response_class=HTMLResponse)
+async def serve_index():
+    return RedirectResponse(url="/static/index.html")
 
 # main 함수: uvicorn 서버 실행
 if __name__ == "__main__":
