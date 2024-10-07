@@ -1,105 +1,139 @@
-from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
-from openai import AsyncOpenAI
+
+from fastapi.responses import RedirectResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles  # StaticFiles 임포트
+from app.api.v1.endpoints import chat  # chat 모듈을 임포트
+
+from fastapi.staticfiles import StaticFiles
+from app.api.v1.endpoints import chat
+from sqlalchemy import text
+from mysql.connector import connect, Error
+from sqlalchemy.orm import Session
+from app.rdb import engine as rdb_engine, Base as rdb_Base, get_rdb
+from app.rdb.models import User, Form, VisitBadge
+from app.rdb import crud, schemas
 from dotenv import load_dotenv
+import uvicorn
 import os
-from app.services.vector_db import get_all_vectors, create_vector_store, search_vector_store, save_vector
-import numpy as np
 
-# 환경 변수 로드
+from app.rdb import engine, Base, get_rdb
+from app.rdb.models import User, Form, VisitBadge
+
+
+
+from pydantic import ValidationError
 load_dotenv()
+# 환경 변수 설정
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
+# FastAPI 애플리케이션 인스턴스 생성
 app = FastAPI()
+
+# 데이터베이스 테이블 생성
+Base.metadata.create_all(bind=engine)
+rdb_Base.metadata.create_all(bind=rdb_engine)
 
 # CORS 설정
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 필요한 도메인으로 변경 가능
+    allow_origins=["http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# OpenAI 비동기 클라이언트 설정
-client = AsyncOpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+# 현재 파일의 디렉토리를 기준으로 상대 경로 사용
+current_dir = os.path.dirname(os.path.abspath(__file__))
+static_directory = os.path.join(current_dir, "..", "public")
+app.mount("/static", StaticFiles(directory=static_directory), name="static")
 
-async def get_embedding(text: str):
-    response = await client.embeddings.create(
-        input=text,
-        model="text-embedding-ada-002"
-    )
-    return response.data[0].embedding
+# chat.py의 라우터를 포함
 
-@app.post("/chat")
-async def chat(request: Request):
-    data = await request.json()
-    user_input = data.get('message')
-    if not user_input:
-        raise HTTPException(status_code=400, detail="No input provided")
+app.include_router(chat.router, prefix="/api/v1")
 
+@app.get("/api/v1/forms/{form_id}")
+async def get_form(form_id: int, db: Session = Depends(get_rdb)):
+    form = db.query(Form).filter(Form.id == form_id).first()
+    
+    if form is None:
+        raise HTTPException(status_code=404, detail="Form not found")
+    return {
+        "id": form.id,
+        "title": form.title,
+        "description": form.description,
+        "fields": form.fields
+    }
+
+
+@app.post("/api/v1/submit-form")
+async def submit_form(request: Request, db: Session = Depends(get_rdb)):
+    body = await request.json()
     try:
-        response = await client.chat.completions.create(
-            model='gpt-3.5-turbo',
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": user_input}
-            ],
-            max_tokens=1024,
-            n=1,
-            stop=None,
-            temperature=0.5
+        visit_badge = schemas.VisitBadgeCreate(**body)
+        # user_id를 body에서 가져오되, 없으면 None으로 설정
+        user_id = body.get('user_id')
+        db_visit_badge = crud.create_visit_badge(db=db, visit_badge=visit_badge, user_id=user_id)
+        return db_visit_badge
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+def get_database_connection():
+    try:
+        connection = connect(
+            host=os.getenv("DB_HOST"),
+            user=os.getenv("DB_USER"),
+            password=os.getenv("DB_PASSWORD"),
+            database=os.getenv("DB_NAME")
         )
-        bot_response = response.choices[0].message.content
+        print("Database connection successful")
+        return connection
+    except Error as e:
+        print(f"Error connecting to MySQL Platform: {e}")
+        raise HTTPException(status_code=500, detail="Database connection failed")
 
-        # 벡터로 변환하여 저장
-        vector = await get_embedding(user_input)
-        vector_bytes = np.array(vector).tobytes()
-        save_vector(vector_bytes)  # 비동기 함수가 아니므로 await 사용하지 않음
-
-        return JSONResponse(content={'response': bot_response})
-    except Exception as e:
-        print(f"Error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/vectors")
-async def create_vectors(request: Request):
-    data = await request.json()
-    documents = data.get('documents')
-    if not documents:
-        raise HTTPException(status_code=400, detail="No documents provided")
-
+# DB 연결 확인용 엔드포인트
+@app.get("/check-db-connection")
+async def check_db_connection():
     try:
-        await create_vector_store(documents)
-        return JSONResponse(content={'detail': 'Vectors created successfully'})
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/vectors")
-async def read_vectors():
-    return await get_all_vectors()
-
-@app.post("/vectors/search")
-async def search_vectors(request: Request):
-    data = await request.json()
-    query = data.get('query')
-    if not query:
-        raise HTTPException(status_code=400, detail="No query provided")
-
+        conn = get_database_connection()
+        conn.close()
+        return {"status": "Database connection successful"}
+    except HTTPException as e:
+        return {"status": str(e.detail)}
+    
+def get_rdb_connection():
     try:
-        documents = [doc[1] for doc in await get_all_vectors()]
-        index = await create_vector_store(documents)
-        
-        indices = await search_vector_store(query, index)
-        return JSONResponse(content={'indices': indices.tolist()})
+        connection = connect(
+            DATABASE_URL = os.getenv('RDB_URL')
+        )
+        print("rdb connection successful")
+        return connection
+    except Error as e:
+        print(f"Error connecting to MySQL Platform: {e}")
+        raise HTTPException(status_code=500, detail="rdb connection failed")
+    
+
+@app.get("/check-rdb-connection")
+async def check_rdb_connection(db: Session = Depends(get_rdb)):
+    try:
+        db.execute(text("SELECT 1"))
+        return {"status": "Database connection successful (AWS RDS)"}
     except Exception as e:
-        print(f"Error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Database connection failed: {str(e)}")
 
-@app.get("/favicon.ico", include_in_schema=False)
-async def favicon():
-    return JSONResponse(content={}, status_code=204)
+# Contest Entry 페이지를 제공하는 엔드포인트
+@app.get("/contest-entry", response_class=HTMLResponse)
+async def serve_index():
+    index_path = os.path.join(static_directory, "index.html")
+    print(f"Serving file from: {index_path}")  # 파일 경로를 출력하여 확인
+    try:
+        with open(index_path, "r", encoding="utf-8") as file:
+            return HTMLResponse(content=file.read())
+    except FileNotFoundError:
+        print(f"Error: File {index_path} not found")  # 오류 로그 추가
+        raise HTTPException(status_code=404, detail="index.html file not found")
 
-if __name__ == '__main__':
-    import uvicorn
-    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
+# main 함수: uvicorn 서버 실행
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)

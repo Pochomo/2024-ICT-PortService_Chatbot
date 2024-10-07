@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <title>공모전 제출</title>
+    <script src="http://localhost:8000/static/script.js" defer></script>
+  </head>
+  <body>
+    <h1>공모전 제출 폼</h1>
+    <form id="submissionForm" enctype="multipart/form-data">
+      <label for="title">제목:</label>
+      <input type="text" name="title" id="title" required />
+      <br />
+      <label for="author">작성자:</label>
+      <input type="text" name="author" id="author" required />
+      <br />
+      <label for="file">파일 선택:</label>
+      <input type="file" name="file" id="file" required />
+      <br />
+      <button type="submit">제출</button>
+    </form>
+    <p id="message"></p>
+  </body>
+</html>

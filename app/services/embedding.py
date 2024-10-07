@@ -1,11 +1,8 @@
-import openai
-from app.core.config import settings
+from sentence_transformers import SentenceTransformer
 
-openai.api_key = settings.OPENAI_API_KEY
+class EmbeddingService:
+    def __init__(self):
+        self.model = SentenceTransformer('all-MiniLM-L6-v2')
 
-def get_embedding(text: str):
-    response = openai.Embedding.create(
-        input=text,
-        model="text-embedding-ada-002"
-    )
-    return response['data'][0]['embedding']
+    def get_embedding(self, text):
+        return self.model.encode(text, convert_to_tensor=True)
