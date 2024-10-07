@@ -14,8 +14,13 @@ document
         body: formData,
       });
 
-      const result = await response.json();
-      document.getElementById("message").innerText = result.message;
+      if (response.ok) {
+        const result = await response.json();
+        document.getElementById("message").innerText = result.message;
+      } else {
+        document.getElementById("message").innerText =
+          "제출에 실패했습니다. 다시 시도해주세요.";
+      }
     } catch (error) {
       console.error("Error:", error);
       document.getElementById("message").innerText =
